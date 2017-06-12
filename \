@@ -26,13 +26,6 @@ typedef struct Obj
 	int type;
 	int value;
 
-	/*
-	 * Used to count how
-	 * big the integer is
-	 * Used in E_SUM
-	 */
-	int num_len;
-
 	struct Obj* next;
 	struct Obj* prev;
 
@@ -60,13 +53,7 @@ static void read(Obj* o);
 static Obj* alloc(int type)
 {
 	Obj* o = malloc(sizeof(Obj));
-
 	o->value = 0;
-	o->num_len = 0;
-
-	o->next = NULL;
-	o->prev = NULL;
-
 	o->type = type;
 
 	return o;
@@ -74,10 +61,6 @@ static Obj* alloc(int type)
 
 static void read_line(Obj* o)
 {
-
-	o->next = alloc(E_NIL);
-	o->prev = alloc(E_NIL);
-
 	while (moduleData.running)
 	{
 		o->type = E_OPEN_PAREN;
@@ -91,20 +74,10 @@ static void end_line(Obj* o)
 	{
 		if (o->type == E_SUM)
 		{
-
-			if (o->type == E_SUM)
-			{
-				printf("%d \n", o->value);
-				o->prev->value = 0;
-				o->value = 0;
-			}
-
-			SAFE_FREE(o->prev);
-			SAFE_FREE(o->next);
+			printf("%d \n", o->value);
+			o->value = 0;
 		}
-
 		o->type = E_CLOSED_PAREN;
-
 		read(o);
 	}
 }
@@ -115,63 +88,66 @@ static void parse_integer(Obj* o, int c)
 	{
 		if (o->type == E_SUM)
 		{
+			//o->value += (c - '0');
+			//printf("%s %d \n", "We parsed integer: ", o->value);
 
-			if (o->next->type != E_COMMA)
-			{
-				if (o->prev == NULL)
-					o->prev = malloc(sizeof(Obj));
-				else
-					o->prev = realloc(o->prev, sizeof(Obj) * o->num_len+1);
-
-				o->prev[o->num_len].value = (c - '0');
-
-				o->num_len++;
-			}
+			o->prev->type = E_INT;
+			o->prev->value += c; /* Not yet transformed from ASCII. We still have to see if our number is bigger or equal to 10 */
 
 			if (o->next->type == E_COMMA)
 			{
-				int start_index = o->num_len > 1 ? 1 : 0;
-				for (int i = start_index; i < o->num_len; i++)
-				{
-					if (o->num_len == 1)
-						o->value += o->prev[i].value + (c - '0');
-					else if (o->num_len > 1)
-					{
-						//printf("%d %d %d \n", o->prev[i-1].value, o->prev[i].value, (c - '0' ));
-						o->value += (o->prev[i-1].value * 10 + o->prev[i].value) + (c - '0');
-					}
-				}
-				o->num_len = 0;
-				SAFE_FREE(o->prev);
+
 			}
 
+
+			read(o);
 		}
-		read(o);
 	}
 }
 
-static void parse_symbol_plus(Obj* o, int c)
+static void read_comma(Obj* o)
 {
 	while (moduleData.running)
 	{
-		o->type = E_SUM;
-		read(o);
-	}
-}
-
-static void parse_symbol_comma(Obj* o, int c)
-{
-	while (moduleData.running)
-	{
-
 		if (o->type == E_SUM)
 		{
+
+			/*
+			 * TODO:
+			 * What if we reach here by mistake?
+			 * Like if we put a comma by mistake?
+			 * Check if 'next' is null
+			 */
 			o->next->type = E_COMMA;
+
+			read(o);
 		}
-		read(o);
 	}
 }
 
+static void parse_symbol(Obj* o, int c)
+{
+	o->next = alloc(E_NIL);
+	o->prev = alloc(E_NIL);
+
+	while (moduleData.running)
+	{
+		if (c == '+')
+		{
+			/*
+			 * For now all of them will be
+			 * declared as sum but later
+			 * INT or STRING
+			 */
+			o->next->type = E_SUM;
+			o->prev->type = E_SUM;
+
+			o->type = E_SUM;
+
+			read(o);
+		}
+	}
+}
 
 /*
  * Read the input from console and interpretate it
@@ -192,6 +168,8 @@ static void read(Obj* o)
 		if (c == ')')
 			end_line(o);
 
+		if (c == ',')
+			read_comma(o);
 
 		if (c == '\n' || c == '\r' || c == '\t' || c == ' ')
 			continue;
@@ -199,11 +177,8 @@ static void read(Obj* o)
 		if (isdigit(c))
 			parse_integer(o, c);
 
-		if (c == '+')
-			parse_symbol_plus(o, c);
-
-		if (c == ',')
-			parse_symbol_comma(o, c);
+		if (isalpha(c) || strchr("+", c))
+			parse_symbol(o, c);
 
 		printf("%s \n", "Can't process the last command given!");
 		moduleData.running = false;
