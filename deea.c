@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <ctype.h>
+#include <math.h>
 
 #include <inttypes.h>
 #include <string.h>
@@ -10,6 +11,10 @@
 #define DEEA_VER "0.0.1"
 
 #define SAFE_FREE(v) {  if (v) {free(v); v = NULL;}  }
+#define car(p) ((p).value.pair->obj[0])
+#define cdr(p) ((p).value.pair->obj[1])
+/* p stands for predicate */
+#define nilp(obj) ((obj).type == ObjType_Nil)
 
 static struct
 {
@@ -18,234 +23,159 @@ static struct
 
 struct Obj;
 
-/*
- * Holds data
- */
 typedef struct Obj
 {
-	int type;
-	int value;
 
-	/*
-	 * Used to count how
-	 * big the integer is
-	 * Used in E_SUM
-	 */
-	int num_len;
+	enum
+	{
+		ObjType_Nil,
+		ObjType_Pair,
+		ObjType_Symbol,
+		ObjType_Integer
+	} type;
 
-	struct Obj* next;
-	struct Obj* prev;
+	union
+	{
+		struct Pair *pair;
+		const char* symbol;
+		long integer;
+	} value;
 
 } Obj;
 
-enum
+struct Pair
 {
-	E_NIL = 1,
-	E_OPEN_PAREN = 2,
-	E_CLOSED_PAREN = 3,
-	E_TRUE = 4,
-	E_FALSE = 5,
-	E_INT = 6,
-	E_FUNCTION = 7,
-	E_SUM = 8,
-	E_COMMA = 9,
+	struct Obj obj[2];
 };
 
-static void read(Obj* o);
+static const Obj nil = { ObjType_Nil };
+static Obj sym_table = {ObjType_Nil };
 
 /*
- * Allocated a new object of a certain type
- * and sets the size for it
+ * Allocate a pair on heap and assign its two elements
  */
-static Obj* alloc(int type)
+Obj cons(Obj car_val, Obj cdr_val)
 {
-	Obj* o = malloc(sizeof(Obj));
+	Obj o;
 
-	o->value = 0;
-	o->num_len = 0;
+	o.type = ObjType_Pair;
+	o.value.pair = malloc(sizeof(struct Pair));
 
-	o->next = NULL;
-	o->prev = NULL;
-
-	o->type = type;
+	car(o) = car_val;
+	cdr(o) = cdr_val;
 
 	return o;
 }
 
-static void read_line(Obj* o)
+Obj make_int(long x)
 {
-
-	o->next = alloc(E_NIL);
-	o->prev = alloc(E_NIL);
-
-	while (moduleData.running)
-	{
-		o->type = E_OPEN_PAREN;
-		read(o);
-	}
+	Obj a;
+	a.type = ObjType_Integer;
+	a.value.integer = x;
+	return a;
 }
 
-static void end_line(Obj* o)
+Obj make_sym(const char* s)
 {
-	while (moduleData.running)
+	Obj a, p;
+
+	p = sym_table;
+	while (!nilp(p))
 	{
-		if (o->type == E_SUM)
-		{
+		a = car(p);
+		if (strcmp(a.value.symbol, s) == 0)
+			return a;
 
-			if (o->type == E_SUM)
-			{
-				printf("%d \n", o->value);
-				o->prev->value = 0;
-				o->value = 0;
-			}
-
-			SAFE_FREE(o->prev);
-			SAFE_FREE(o->next);
-		}
-
-		o->type = E_CLOSED_PAREN;
-
-		read(o);
+		p = cdr(p);
 	}
+
+	a.type = ObjType_Symbol;
+	a.value.symbol = s;
+	sym_table = cons(a, sym_table);
+
+	return a;
 }
-
-static void parse_integer(Obj* o, int c)
-{
-	while (moduleData.running)
-	{
-		if (o->type == E_SUM)
-		{
-
-			if (o->next->type != E_COMMA)
-			{
-				if (o->prev == NULL)
-					o->prev = malloc(sizeof(Obj));
-				else
-					o->prev = realloc(o->prev, sizeof(Obj) * o->num_len+1);
-
-				o->prev[o->num_len].value = (c - '0');
-
-				o->num_len++;
-			}
-
-			if (o->next->type == E_COMMA)
-			{
-				int start_index = o->num_len > 1 ? 1 : 0;
-				for (int i = start_index; i < o->num_len; i++)
-				{
-					if (o->num_len == 1)
-						o->value += o->prev[i].value + (c - '0');
-					else if (o->num_len > 1)
-					{
-						//printf("%d %d %d \n", o->prev[i-1].value, o->prev[i].value, (c - '0' ));
-						o->value += (o->prev[i-1].value * 10 + o->prev[i].value) + (c - '0');
-					}
-				}
-				o->num_len = 0;
-				SAFE_FREE(o->prev);
-			}
-
-		}
-		read(o);
-	}
-}
-
-static void parse_symbol_plus(Obj* o, int c)
-{
-	while (moduleData.running)
-	{
-		o->type = E_SUM;
-		read(o);
-	}
-}
-
-static void parse_symbol_comma(Obj* o, int c)
-{
-	while (moduleData.running)
-	{
-
-		if (o->type == E_SUM)
-		{
-			o->next->type = E_COMMA;
-		}
-		read(o);
-	}
-}
-
 
 /*
- * Read the input from console and interpretate it
+ * Example of pair:
+ * ( a . b)
+ * a = car
+ * b = cdr
  */
-static void read(Obj* o)
+
+void print_expr(Obj o)
 {
-
-	while(moduleData.running)
+	switch(o.type)
 	{
-		int c = getchar();
-
-		if (c == EOF)
-			return;
-
-		if (c == '(')
-			read_line(o);
-
-		if (c == ')')
-			end_line(o);
-
-
-		if (c == '\n' || c == '\r' || c == '\t' || c == ' ')
-			continue;
-
-		if (isdigit(c))
-			parse_integer(o, c);
-
-		if (c == '+')
-			parse_symbol_plus(o, c);
-
-		if (c == ',')
-			parse_symbol_comma(o, c);
-
-		printf("%s \n", "Can't process the last command given!");
-		moduleData.running = false;
+		case ObjType_Nil:
+			printf("NIL");
+			break;
+		case ObjType_Pair:
+			putchar('(');
+			print_expr(car(o));
+			o = cdr(o);
+			while (!nilp(o))
+			{
+				if (o.type == ObjType_Pair)
+				{
+					putchar(' ');
+					print_expr(car(o));
+					o = cdr(o);
+				}
+				else
+				{
+					printf(" . ");
+					print_expr(o);
+					break;
+				}
+			}
+			putchar(')');
+			break;
+		case ObjType_Symbol:
+			printf("%s \n", o.value.symbol);
+			break;
+		case ObjType_Integer:
+			printf("%ld \n", o.value.integer);
+			break;
 	}
-
 }
 
 int main(int argc, char* argv[])
 {
 
-	moduleData.running = true;
+	Obj o;
 
-	printf("%s %s %s \n", "Deea version:", DEEA_VER, "has started. ");
+	o = make_int(42);
+	print_expr(o);
 
-	for (int i = 1; i < argc; i++)
-	{
-		if ( (strcmp(argv[i], "--version") == 0 ) || strcmp(argv[i], "-version"))
-			printf("%s \n", DEEA_VER);
+	o = make_sym("FOO");
+	print_expr(o);
 
-	}
-
-	char buffer[256];
-
-	Obj* o = alloc(E_NIL);
-
-	/* Main loop */
-	while (moduleData.running)
-	{
-
-		read(o);
-
-		while (fgets(buffer, 256, stdin))
-		{
-			if (strcmp(buffer, "quit"))
-			{
-				moduleData.running = false;
-				break;
-			}
-		}
-	}
-
-	SAFE_FREE(o);
+	o = cons(make_int(1),  cons(make_int(2), cons(make_int(3), nil)));
+	print_expr(o);
 
 	return 0;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
