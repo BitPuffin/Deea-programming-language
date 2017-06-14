@@ -11,8 +11,8 @@
 #define DEEA_VER "0.0.1"
 
 #define SAFE_FREE(v) {  if (v) {free(v); v = NULL;}  }
-#define car(p) ((p).value.pair->obj[0])
-#define cdr(p) ((p).value.pair->obj[1])
+#define firstp(p) ((p).value.pair->obj[0])
+#define secondp(p) ((p).value.pair->obj[1])
 /* p stands for predicate */
 #define nilp(obj) ((obj).type == ObjType_Nil)
 
@@ -91,7 +91,7 @@ int eval_expr(Obj expr, Obj env, Obj* result);
 char* _strdup(const char* s);
 Obj make_int(long x);
 Obj make_sym(const char* s);
-Obj cons(Obj car_val, Obj cdr_val);
+Obj cons(Obj firstp_val, Obj secondp_val);
 /************* END OF DECLARATIONS ****************/
 
 
@@ -113,31 +113,31 @@ int eval_expr(Obj expr, Obj env, Obj* result)
 	if (!listp(expr))
 		return Error_Syntax;
 
-	op = car(expr);
-	args = cdr(expr);
+	op = firstp(expr);
+	args = secondp(expr);
 
 	if (op.type == ObjType_Symbol)
 	{
 		if (strcmp(op.value.symbol, "QUOTE") == 0)
 		{
-			if(nilp(args) || !nilp(cdr(args)))
+			if(nilp(args) || !nilp(secondp(args)))
 				return Error_Args;
 
-			*result = car(args);
+			*result = firstp(args);
 			return Error_OK;
 		}
 		else if (strcmp(op.value.symbol, "DEFINE") == 0)
 		{
 			Obj sym,val;
 
-			if (nilp(args) || nilp(cdr(args)) || !nilp(cdr(cdr(args))))
+			if (nilp(args) || nilp(secondp(args)) || !nilp(cdr(cdr(args))))
 				return Error_Args;
 
-			sym = car(args);
+			sym = firstp(args);
 			if (sym.type != ObjType_Symbol)
 				return Error_Type;
 
-			err = eval_expr(car(cdr(args)), env, &val);
+			err = eval_expr(firstp(secondp(args)), env, &val);
 			if (err)
 				return err;
 
@@ -156,7 +156,7 @@ int listp(Obj expr)
 		{
 			return 0;
 		}
-		expr = cdr(expr);
+		expr = secondp(expr);
 	}
 	return 1;
 }
@@ -168,18 +168,18 @@ Obj env_create(Obj parent)
 
 int env_get(Obj env, Obj symbol, Obj* result)
 {
-	Obj parent = car(env);
-	Obj bs = cdr(env);
+	Obj parent = firstp(env);
+	Obj bs = secondp(env);
 
 	while(!nilp(bs))
 	{
-		Obj b = car(bs);
-		if (car(b).value.symbol == symbol.value.symbol)
+		Obj b = firstp(bs);
+		if (firstp(b).value.symbol == symbol.value.symbol)
 		{
-			*result = cdr(b);
+			*result = secondp(b);
 			return Error_OK;
 		}
-		bs = cdr(bs);
+		bs = secondp(bs);
 	}
 	if (nilp(parent))
 		return Error_Unbound;
@@ -189,22 +189,22 @@ int env_get(Obj env, Obj symbol, Obj* result)
 
 int env_set(Obj env, Obj symbol, Obj value)
 {
-	Obj bs = cdr(env);
+	Obj bs = secondp(env);
 	Obj b = nil;
 
 	while (!nilp(bs))
 	{
-		b = car(bs);
-		if (car(b).value.symbol == symbol.value.symbol)
+		b = firstp(bs);
+		if (firstp(b).value.symbol == symbol.value.symbol)
 		{
-			cdr(b) = value;
+			secondp(b) = value;
 			return Error_OK;
 		}
-		bs = cdr(bs);
+		bs = secondp(bs);
 	}
 
 	b = cons(symbol, value);
-	cdr(env) = cons(b, cdr(env));
+	secondp(env) = cons(b, cdr(env));
 
 	return Error_OK;
 }
@@ -335,7 +335,7 @@ int read_list(const char* start, const char** end, Obj* result)
 			if (err)
 				return err;
 
-			cdr(p) = item;
+			secondp(p) = item;
 
 			/* Read the closing ')' */
 			err = lexer(*end, &token, end);
@@ -357,8 +357,8 @@ int read_list(const char* start, const char** end, Obj* result)
 		}
 		else
 		{
-			cdr(p) = cons(item, nil);
-			p = cdr(p);
+			secondp(p) = cons(item, nil);
+			p = secondp(p);
 		}
 
 	}
@@ -367,15 +367,15 @@ int read_list(const char* start, const char** end, Obj* result)
 /*
  * Allocate a pair on heap and assign its two elements
  */
-Obj cons(Obj car_val, Obj cdr_val)
+Obj cons(Obj firstp_val, Obj secondp_val)
 {
 	Obj o;
 
 	o.type = ObjType_Pair;
 	o.value.pair = malloc(sizeof(struct Pair));
 
-	car(o) = car_val;
-	cdr(o) = cdr_val;
+	firstp(o) = car_val;
+	secondp(o) = cdr_val;
 
 	return o;
 }
@@ -411,11 +411,11 @@ Obj make_sym(const char* s)
 	 */
 	while (!nilp(p))
 	{
-		a = car(p);
+		a = firstp(p);
 		if (strcmp(a.value.symbol, s) == 0)
 			return a;
 
-		p = cdr(p);
+		p = secondp(p);
 	}
 
 	a.type = ObjType_Symbol;
@@ -428,8 +428,8 @@ Obj make_sym(const char* s)
 /*
  * Example of pair:
  * ( a . b)
- * a = car
- * b = cdr
+ * a = firstp
+ * b = secondp
  */
 
 void print_expr(Obj o)
@@ -441,15 +441,15 @@ void print_expr(Obj o)
 			break;
 		case ObjType_Pair:
 			putchar('(');
-			print_expr(car(o));
-			o = cdr(o);
+			print_expr(firstp(o));
+			o = secondp(o);
 			while (!nilp(o))
 			{
 				if (o.type == ObjType_Pair)
 				{
 					putchar(' ');
-					print_expr(car(o));
-					o = cdr(o);
+					print_expr(firstp(o));
+					o = secondp(o);
 				}
 				else
 				{
