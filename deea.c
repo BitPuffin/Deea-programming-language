@@ -57,18 +57,157 @@ typedef enum
 {
 	Error_OK = 0,
 	Error_Syntax = 1,
+	/*
+	 * Attempted to evaluate a symbol
+	 * for which no bindings exists
+	 */
+	Error_Unbound = 2,
+	/*
+	 * A list expression was shorter or longer
+	 * than expected
+	 */
+	Error_Args = 3,
+	/*
+	 * An object in a expression was of
+	 * a different type than expected
+	 */
+	Error_Type = 4,
 } Error;
 
 
+/************* START OF DECLARATIONS ****************/
 int read_expr(const char* input, const char** end, Obj* result);
 int read_list(const char* start, const char** end, Obj* result);
 int parse_simple(const char* start, const char* end, Obj* result);
 int lexer(const char* str, const char** start, const char** end);
+int listp(Obj expr);
 
-char* strdup(const char* s);
+Obj env_create(Obj parent);
+int env_set(Obj env, Obj symbol, Obj value);
+int env_get(Obj env, Obj symbol, Obj* result);
+
+int eval_expr(Obj expr, Obj env, Obj* result);
+
+char* _strdup(const char* s);
 Obj make_int(long x);
 Obj make_sym(const char* s);
 Obj cons(Obj car_val, Obj cdr_val);
+/************* END OF DECLARATIONS ****************/
+
+
+int eval_expr(Obj expr, Obj env, Obj* result)
+{
+	Obj op, args;
+	Error err;
+
+	if (expr.type == ObjType_Symbol)
+	{
+		return env_get(env, expr, result);
+	}
+	else if (expr.type != ObjType_Pair)
+	{
+		*result = expr;
+		return Error_OK;
+	}
+
+	if (!listp(expr))
+		return Error_Syntax;
+
+	op = car(expr);
+	args = cdr(expr);
+
+	if (op.type == ObjType_Symbol)
+	{
+		if (strcmp(op.value.symbol, "QUOTE") == 0)
+		{
+			if(nilp(args) || !nilp(cdr(args)))
+				return Error_Args;
+
+			*result = car(args);
+			return Error_OK;
+		}
+		else if (strcmp(op.value.symbol, "DEFINE") == 0)
+		{
+			Obj sym,val;
+
+			if (nilp(args) || nilp(cdr(args)) || !nilp(cdr(cdr(args))))
+				return Error_Args;
+
+			sym = car(args);
+			if (sym.type != ObjType_Symbol)
+				return Error_Type;
+
+			err = eval_expr(car(cdr(args)), env, &val);
+			if (err)
+				return err;
+
+			*result = sym;
+			return env_set(env, sym, val);
+		}
+	}
+	return Error_Syntax;
+}
+
+int listp(Obj expr)
+{
+	while (!nilp(expr))
+	{
+		if (expr.type != ObjType_Pair)
+		{
+			return 0;
+		}
+		expr = cdr(expr);
+	}
+	return 1;
+}
+
+Obj env_create(Obj parent)
+{
+	return cons(parent, nil);
+}
+
+int env_get(Obj env, Obj symbol, Obj* result)
+{
+	Obj parent = car(env);
+	Obj bs = cdr(env);
+
+	while(!nilp(bs))
+	{
+		Obj b = car(bs);
+		if (car(b).value.symbol == symbol.value.symbol)
+		{
+			*result = cdr(b);
+			return Error_OK;
+		}
+		bs = cdr(bs);
+	}
+	if (nilp(parent))
+		return Error_Unbound;
+
+	return env_get(parent, symbol, result);
+}
+
+int env_set(Obj env, Obj symbol, Obj value)
+{
+	Obj bs = cdr(env);
+	Obj b = nil;
+
+	while (!nilp(bs))
+	{
+		b = car(bs);
+		if (car(b).value.symbol == symbol.value.symbol)
+		{
+			cdr(b) = value;
+			return Error_OK;
+		}
+		bs = cdr(bs);
+	}
+
+	b = cons(symbol, value);
+	cdr(env) = cons(b, cdr(env));
+
+	return Error_OK;
+}
 
 int lexer(const char* str, const char** start, const char** end)
 {
@@ -152,8 +291,6 @@ int parse_simple(const char* start, const char* end, Obj* result)
 		++start;
 	}
 	*p = '\0';
-
-	printf("%s %s \n", "Buffer is: ", buf);
 
 	if (strcmp(buf, "NIL") == 0)
 		*result = nil;
@@ -251,7 +388,7 @@ Obj make_int(long x)
 	return a;
 }
 
-char* strdup(const char* s)
+char* _strdup(const char* s)
 {
 	char* d = malloc(strlen(s) + 1);
 	if (d == NULL) return NULL;
@@ -281,11 +418,8 @@ Obj make_sym(const char* s)
 		p = cdr(p);
 	}
 
-
-	printf("%s %s \n", "Symbol recieved: ", s);
-
 	a.type = ObjType_Symbol;
-	a.value.symbol = strdup(s);
+	a.value.symbol = _strdup(s);
 	sym_table = cons(a, sym_table);
 
 	return a;
@@ -351,24 +485,40 @@ int main(int argc, char* argv[])
 	print_expr(o);
 	*/
 
-	char* input = "(42 foo)";
+	//char* input = "(42 foo)";
+	char input[256];
 
-	//while (fgets(input, 256, stdin) != NULL)
+	Obj env;
+	env = env_create(nil);
+
+	while (fgets(input, 256, stdin) != NULL)
 	{
 		const char* p = input;
 		Error err;
-		Obj obj;
+		Obj expr, result;
 
-		err = read_expr(p, &p, &obj);
+		err = read_expr(p, &p, &expr);
+
+		if (!err)
+			err = eval_expr(expr, env, &result);
 
 		switch (err)
 		{
 			case Error_OK:
-				print_expr(obj);
+				print_expr(result);
 				putchar('\n');
 				break;
 			case Error_Syntax:
 				puts("Syntax error");
+				break;
+			case Error_Unbound:
+				puts("Symbol not bound");
+				break;
+			case Error_Args:
+				puts("Wrong number of arguments");
+				break;
+			case Error_Type:
+				puts("Wrong type");
 				break;
 		}
 	}
