@@ -1,16 +1,14 @@
-# Prerequisites
-*.d
-
 # Object files
 *.o
 *.ko
 *.obj
 *.elf
+*.py[cod]
 
-# Linker output
-*.ilk
-*.map
-*.exp
+#Editors
+*~
+*.swp
+*.swo
 
 # Precompiled Headers
 *.gch
@@ -38,15 +36,13 @@
 
 # Debug files
 *.dSYM/
-*.su
-*.idb
-*.pdb
 
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
+# OS specific files
+.DS_Store
+
+# cmake output folder
+build/
+
+# cmake build files
+*.txt.*
+*.txt.*
