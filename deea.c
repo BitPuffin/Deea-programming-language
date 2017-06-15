@@ -22,8 +22,9 @@ static struct
 	bool running;
 } moduleData;
 */
-
 struct Obj;
+
+typedef int (*Builtin) (struct Obj, struct Obj* result);
 
 typedef struct Obj
 {
@@ -33,7 +34,8 @@ typedef struct Obj
 		ObjType_Nil,
 		ObjType_Pair,
 		ObjType_Symbol,
-		ObjType_Integer
+		ObjType_Integer,
+		ObjType_Builtin
 	} type;
 
 	union
@@ -41,6 +43,7 @@ typedef struct Obj
 		struct Pair *pair;
 		const char* symbol;
 		long integer;
+		Builtin builtin;
 	} value;
 
 } Obj;
@@ -92,12 +95,103 @@ char* _strdup(const char* s);
 Obj make_int(long x);
 Obj make_sym(const char* s);
 Obj cons(Obj car_val, Obj cdr_val);
+
+Obj make_builtin(Builtin fn);
+Obj copy_list(Obj list);
+int apply(Obj fn, Obj args, Obj* result);
+
+int builtin_p1(Obj args, Obj* result);
+int builtin_p2(Obj args, Obj* result);
+int builtin_cons(Obj args, Obj* result);
+
 /************* END OF DECLARATIONS ****************/
 
+int builtin_p1(Obj args, Obj* result)
+{
+
+	if(nilp(args) || !nilp(p2(args)))
+		return Error_Args;
+
+	if (nilp(p1(args)))
+		*result = nil;
+	else if (p1(args).type != ObjType_Pair)
+		return Error_Type;
+	else
+		*result = p1(p1(args));
+
+	return Error_OK;
+}
+
+
+int builtin_p2(Obj args, Obj* result)
+{
+
+	if (nilp(args) || !nilp(p2(args)))
+		return Error_Args;
+
+	if (nilp(p1(args)))
+		*result = nil;
+	else if (p1(args).type != ObjType_Pair)
+		return Error_Type;
+	else
+		*result = p2(p1(args));
+
+	return Error_OK;
+}
+
+
+int builtin_cons(Obj args, Obj* result)
+{
+
+	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
+		return Error_Args;
+
+	*result = cons(p1(args), p1(p2(args)));
+
+	return Error_OK;
+}
+
+
+Obj make_builtin(Builtin fn)
+{
+	Obj a;
+	a.type = ObjType_Builtin;
+	a.value.builtin = fn;
+	return a;
+}
+
+Obj copy_list(Obj list)
+{
+	Obj a, p;
+	if (nilp(list))
+		return nil;
+
+	a = cons(p1(list), nil);
+	p = a;
+	list = p2(list);
+
+	while(!nilp(list))
+	{
+		p2(p) = cons(p1(list), nil);
+		p = p2(p);
+		list = p2(list);
+	}
+
+	return a;
+}
+
+int apply(Obj fn, Obj args, Obj* result)
+{
+	if (fn.type == ObjType_Builtin)
+		return (*fn.value.builtin)(args, result);
+
+	return Error_Type;
+
+}
 
 int eval_expr(Obj expr, Obj env, Obj* result)
 {
-	Obj op, args;
+	Obj op, args, p;
 	Error err;
 
 	if (expr.type == ObjType_Symbol)
@@ -145,7 +239,25 @@ int eval_expr(Obj expr, Obj env, Obj* result)
 			return env_set(env, sym, val);
 		}
 	}
-	return Error_Syntax;
+
+	/* Evaluate operators */
+	err = eval_expr(op, env, &op);
+	if (err)
+		return err;
+
+	/* Evaluate arguments */
+	args = copy_list(args);
+	p = args;
+	while(!nilp(p))
+	{
+		err = eval_expr(p1(p), env, &p1(p));
+		if (err)
+			return err;
+
+		p = p2(p);
+	}
+
+	return apply(op, args, result);
 }
 
 int listp(Obj expr)
@@ -466,6 +578,9 @@ void print_expr(Obj o)
 		case ObjType_Integer:
 			printf("%ld \n", o.value.integer);
 			break;
+		case ObjType_Builtin:
+			printf("#<BUILTIN:%p>", o.value.builtin);
+			break;
 	}
 }
 
@@ -490,6 +605,11 @@ int main(int argc, char* argv[])
 
 	Obj env;
 	env = env_create(nil);
+
+	/* Set initial env */
+	env_set(env, make_sym("CAR"), make_builtin(builtin_p1));
+	env_set(env, make_sym("CDR"), make_builtin(builtin_p2));
+	env_set(env, make_sym("CONS"), make_builtin(builtin_cons));
 
 	while (fgets(input, 256, stdin) != NULL)
 	{
