@@ -103,9 +103,13 @@ int apply(Obj fn, Obj args, Obj* result);
 int builtin_p1(Obj args, Obj* result);
 int builtin_p2(Obj args, Obj* result);
 int builtin_cons(Obj args, Obj* result);
-
+int builtin_add(Obj args, Obj* result);
+int builtin_sub(Obj args, Obj* result);
+int builtin_div(Obj args, Obj* result);
+int builtin_mul(Obj args, Obj* result);
 /************* END OF DECLARATIONS ****************/
 
+/************* BUILT IN FUNCTIONS WHICH DO STUFF ************/
 int builtin_p1(Obj args, Obj* result)
 {
 
@@ -140,6 +144,79 @@ int builtin_p2(Obj args, Obj* result)
 }
 
 
+int builtin_add(Obj args, Obj* result)
+{
+	Obj a, b;
+
+	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
+		return Error_Args;
+
+	a = p1(args);
+	b = p1(p2(args));
+
+	if (a.type != ObjType_Integer || b.type != ObjType_Integer)
+		return Error_Type;
+
+	*result = make_int (a.value.integer + b.value.integer);
+
+	return Error_OK;
+}
+
+int builtin_sub(Obj args, Obj* result)
+{
+	Obj a, b;
+
+	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
+		return Error_Args;
+
+	a = p1(args);
+	b = p1(p2(args));
+
+	if (a.type != ObjType_Integer || b.type != ObjType_Integer)
+		return Error_Type;
+
+	*result = make_int (a.value.integer - b.value.integer);
+
+	return Error_OK;
+}
+
+int builtin_mul(Obj args, Obj* result)
+{
+	Obj a, b;
+
+	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
+		return Error_Args;
+
+	a = p1(args);
+	b = p1(p2(args));
+
+	if (a.type != ObjType_Integer || b.type != ObjType_Integer)
+		return Error_Type;
+
+	*result = make_int (a.value.integer * b.value.integer);
+
+	return Error_OK;
+}
+
+int builtin_div(Obj args, Obj* result)
+{
+	Obj a, b;
+
+	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
+		return Error_Args;
+
+	a = p1(args);
+	b = p1(p2(args));
+
+	if (a.type != ObjType_Integer || b.type != ObjType_Integer)
+		return Error_Type;
+
+	*result = make_int (a.value.integer / b.value.integer);
+
+	return Error_OK;
+}
+
+
 int builtin_cons(Obj args, Obj* result)
 {
 
@@ -150,7 +227,7 @@ int builtin_cons(Obj args, Obj* result)
 
 	return Error_OK;
 }
-
+/***************** END OF BUILT IN FUNCTION WHICH DO STUFF ****************/
 
 Obj make_builtin(Builtin fn)
 {
@@ -222,7 +299,7 @@ int eval_expr(Obj expr, Obj env, Obj* result)
 		}
 		else if (strcmp(op.value.symbol, "DEFINE") == 0)
 		{
-			Obj sym,val;
+			Obj sym, val;
 
 			if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
 				return Error_Args;
@@ -610,6 +687,10 @@ int main(int argc, char* argv[])
 	env_set(env, make_sym("CAR"), make_builtin(builtin_p1));
 	env_set(env, make_sym("CDR"), make_builtin(builtin_p2));
 	env_set(env, make_sym("CONS"), make_builtin(builtin_cons));
+	env_set(env, make_sym("+"), make_builtin(builtin_add));
+	env_set(env, make_sym("-"), make_builtin(builtin_sub));
+	env_set(env, make_sym("*"), make_builtin(builtin_mul));
+	env_set(env, make_sym("/"), make_builtin(builtin_div));
 
 	while (fgets(input, 256, stdin) != NULL)
 	{
