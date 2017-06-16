@@ -97,6 +97,11 @@ int apply(Obj fn, Obj args, Obj* result);
 
 int make_closure(Obj env, Obj args, Obj body, Obj* result);
 
+int builtin_numless(Obj args, Obj* result);
+int builtin_numgr(Obj args, Obj* result);
+int builtin_numlessoreq(Obj args, Obj* result);
+int builtin_numgroreq(Obj args, Obj* result);
+int builtin_numeq(Obj args, Obj* result);
 int builtin_p1(Obj args, Obj* result);
 int builtin_p2(Obj args, Obj* result);
 int builtin_cons(Obj args, Obj* result);
@@ -140,6 +145,101 @@ int builtin_p2(Obj args, Obj* result)
 	return Error_OK;
 }
 
+
+int builtin_numless(Obj args, Obj* result)
+{
+	Obj a, b;
+
+	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
+		return Error_Args;
+
+	a = p1(args);
+	b = p1(p2(args));
+
+	if (a.type != ObjType_Integer || b.type != ObjType_Integer)
+		return Error_Type;
+
+	* result = (a.value.integer < b.value.integer) ? make_sym("T") : nil;
+
+	return Error_OK;
+}
+
+
+int builtin_numgr(Obj args, Obj* result)
+{
+	Obj a, b;
+
+	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
+		return Error_Args;
+
+	a = p1(args);
+	b = p1(p2(args));
+
+	if (a.type != ObjType_Integer || b.type != ObjType_Integer)
+		return Error_Type;
+
+	* result = (a.value.integer > b.value.integer) ? make_sym("T") : nil;
+
+	return Error_OK;
+}
+
+
+int builtin_numlessoreq(Obj args, Obj* result)
+{
+	Obj a, b;
+
+	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
+		return Error_Args;
+
+	a = p1(args);
+	b = p1(p2(args));
+
+	if (a.type != ObjType_Integer || b.type != ObjType_Integer)
+		return Error_Type;
+
+	* result = (a.value.integer <= b.value.integer) ? make_sym("T") : nil;
+
+	return Error_OK;
+}
+
+
+int builtin_numgroreq(Obj args, Obj* result)
+{
+	Obj a, b;
+
+	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
+		return Error_Args;
+
+	a = p1(args);
+	b = p1(p2(args));
+
+	if (a.type != ObjType_Integer || b.type != ObjType_Integer)
+		return Error_Type;
+
+	* result = (a.value.integer >= b.value.integer) ? make_sym("T") : nil;
+
+	return Error_OK;
+}
+
+
+int builtin_numeq(Obj args, Obj* result)
+{
+	Obj a, b;
+
+	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
+		return Error_Args;
+
+	a = p1(args);
+	b = p1(p2(args));
+
+	if (a.type != ObjType_Integer || b.type != ObjType_Integer)
+		return Error_Type;
+
+	* result = (a.value.integer == b.value.integer) ? make_sym("T") : nil;
+
+	return Error_OK;
+
+}
 
 int builtin_add(Obj args, Obj* result)
 {
@@ -361,6 +461,21 @@ int eval_expr(Obj expr, Obj env, Obj* result)
 
 			return make_closure(env, p1(args), p2(args), result);
 		}
+		else if (strcmp(op.value.symbol, "IF") == 0)
+		{
+			Obj cond, val;
+
+			if (nilp(args) || nilp(p2(args)) || nilp(p2(p2(args))) || !nilp(p2(p2(p2(args)))))
+				return Error_Args;
+
+			err = eval_expr(p1(args), env, &cond);
+			if (err)
+				return err;
+
+			val = nilp(cond) ? p1(p2(p2(args))) : p1(p2(args));
+			return eval_expr(val, env, result);
+
+		}
 		else if (strcmp(op.value.symbol, "DEFINE") == 0)
 		{
 			Obj sym, val;
@@ -467,7 +582,7 @@ int lexer(const char* str, const char** start, const char** end)
 
 	const char* ws = " \t\n";
 	const char* delim = "() \t\n";
-	const char* prefix = "()";
+	const char* prefix = "()\'";
 
 	str += strspn(str, ws);
 
@@ -510,6 +625,11 @@ int read_expr(const char* input, const char** end, Obj* result)
 	else if (token[0] == ')')
 	{
 		return Error_Syntax;
+	}
+	else if (token[0] == '\'')
+	{
+		*result = cons(make_sym("QUOTE"), cons (nil,nil));
+		return read_expr(*end, end, &p1(p2(*result)));
 	}
 	else
 	{
@@ -755,6 +875,12 @@ int main(int argc, char* argv[])
 	env_set(env, make_sym("-"), make_builtin(builtin_sub));
 	env_set(env, make_sym("*"), make_builtin(builtin_mul));
 	env_set(env, make_sym("/"), make_builtin(builtin_div));
+	env_set(env, make_sym("T"), make_sym("T"));
+	env_set(env, make_sym("="), make_builtin(builtin_numeq));
+	env_set(env, make_sym("<"), make_builtin(builtin_numless));
+	env_set(env, make_sym(">"), make_builtin(builtin_numgr));
+	env_set(env, make_sym(">="), make_builtin(builtin_numgroreq));
+	env_set(env, make_sym("<="), make_builtin(builtin_numlessoreq));
 
 	while (fgets(input, 256, stdin) != NULL)
 	{
