@@ -1,4 +1,11 @@
-
+/*
+#   deea programming language
+#
+#   Copyright (C) 2017 Muresan Vlad
+#
+#   This project is free software; you can redistribute it and/or modify it
+#   under the terms of the MIT license. See LICENSE.md for details.
+*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -330,7 +337,7 @@ int make_closure(Obj env, Obj args, Obj body, Obj* result)
 {
 	Obj p;
 
-	if (!listp(args) || !listp(body))
+	if (!listp(body))
 		return Error_Syntax;
 
 	/* Check argument names are all symbols */
@@ -338,7 +345,9 @@ int make_closure(Obj env, Obj args, Obj body, Obj* result)
 	while(!nilp(p))
 	{
 
-		if (p1(p).type != ObjType_Symbol)
+		if (p.type == ObjType_Symbol)
+			break;
+		else if (p.type != ObjType_Pair || p1(p).type != ObjType_Symbol)
 			return Error_Type;
 
 		p = p2(p);
@@ -397,6 +406,14 @@ int apply(Obj fn, Obj args, Obj* result)
 	/* Bind arguments */
 	while (!nilp(args_names))
 	{
+
+		if (args_names.type == ObjType_Symbol)
+		{
+			env_set(env, args_names, args);
+			args = nil;
+			break;
+		}
+
 		if (nilp(args))
 			return Error_Args;
 
@@ -484,10 +501,21 @@ int eval_expr(Obj expr, Obj env, Obj* result)
 				return Error_Args;
 
 			sym = p1(args);
-			if (sym.type != ObjType_Symbol)
+
+			if (sym.type == ObjType_Pair)
+			{
+				err = make_closure(env, p2(sym), p2(args), &val);
+				sym = p1(sym);
+				if (sym.type != ObjType_Symbol)
+					return Error_Type;
+			} else if (sym.type == ObjType_Symbol)
+			{
+				if (!nilp(p2(args)))
+					return Error_Args;
+				err = eval_expr(p1(p2(args)), env, &val);
+			} else
 				return Error_Type;
 
-			err = eval_expr(p1(p2(args)), env, &val);
 			if (err)
 				return err;
 
