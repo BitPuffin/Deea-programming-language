@@ -16,12 +16,6 @@
 /* p stands for predicate */
 #define nilp(obj) ((obj).type == ObjType_Nil)
 
-/*
-static struct
-{
-	bool running;
-} moduleData;
-*/
 struct Obj;
 
 typedef int (*Builtin) (struct Obj, struct Obj* result);
@@ -35,7 +29,8 @@ typedef struct Obj
 		ObjType_Pair,
 		ObjType_Symbol,
 		ObjType_Integer,
-		ObjType_Builtin
+		ObjType_Builtin,
+		ObjType_Closure
 	} type;
 
 	union
@@ -99,6 +94,8 @@ Obj cons(Obj car_val, Obj cdr_val);
 Obj make_builtin(Builtin fn);
 Obj copy_list(Obj list);
 int apply(Obj fn, Obj args, Obj* result);
+
+int make_closure(Obj env, Obj args, Obj body, Obj* result);
 
 int builtin_p1(Obj args, Obj* result);
 int builtin_p2(Obj args, Obj* result);
@@ -229,6 +226,32 @@ int builtin_cons(Obj args, Obj* result)
 }
 /***************** END OF BUILT IN FUNCTION WHICH DO STUFF ****************/
 
+int make_closure(Obj env, Obj args, Obj body, Obj* result)
+{
+	Obj p;
+
+	if (!listp(args) || !listp(body))
+		return Error_Syntax;
+
+	/* Check argument names are all symbols */
+	p = args;
+	while(!nilp(p))
+	{
+
+		if (p1(p).type != ObjType_Symbol)
+			return Error_Type;
+
+		p = p2(p);
+	}
+
+	*result = cons(env, cons(args, body));
+	/* Override default 'Pair' type */
+	result->type = ObjType_Closure;
+
+	return Error_OK;
+
+}
+
 Obj make_builtin(Builtin fn)
 {
 	Obj a;
@@ -259,10 +282,44 @@ Obj copy_list(Obj list)
 
 int apply(Obj fn, Obj args, Obj* result)
 {
+
+	Obj env, args_names, body;
+
 	if (fn.type == ObjType_Builtin)
 		return (*fn.value.builtin)(args, result);
+	else if (fn.type != ObjType_Closure)
+		return Error_Type;
 
-	return Error_Type;
+	env = env_create(p1(fn));
+	args_names = p1(p2(fn));
+	body = p2(p2(fn));
+
+	/* Bind arguments */
+	while (!nilp(args_names))
+	{
+		if (nilp(args))
+			return Error_Args;
+
+		env_set(env, p1(args_names), p1(args));
+		args_names = p2(args_names);
+
+		args = p2(args);
+	}
+
+	if (!nilp(args))
+		return Error_Args;
+
+	/* Evaluate the body */
+	while(!nilp(body))
+	{
+		Error err = eval_expr(p1(body), env, result);
+		if(err)
+			return err;
+
+		body = p2(body);
+	}
+
+	return Error_OK;
 
 }
 
@@ -296,6 +353,13 @@ int eval_expr(Obj expr, Obj env, Obj* result)
 
 			*result = p1(args);
 			return Error_OK;
+		}
+		else if (strcmp(op.value.symbol, "LAMBDA") == 0)
+		{
+			if (nilp(args) || nilp(p2(args)))
+				return Error_Args;
+
+			return make_closure(env, p1(args), p2(args), result);
 		}
 		else if (strcmp(op.value.symbol, "DEFINE") == 0)
 		{
