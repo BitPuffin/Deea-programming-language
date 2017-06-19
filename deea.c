@@ -86,12 +86,19 @@ int read_list(const char* start, const char** end, Obj* result);
 int parse_simple(const char* start, const char* end, Obj* result);
 int lexer(const char* str, const char** start, const char** end);
 int listp(Obj expr);
+Obj list_get(Obj list, int k);
+void list_set(Obj list, int k, Obj value);
+void list_reverse(Obj* list);
+Obj make_frame(Obj parent, Obj env, Obj tail);
 
 Obj env_create(Obj parent);
 int env_set(Obj env, Obj symbol, Obj value);
 int env_get(Obj env, Obj symbol, Obj* result);
 
+int eval_do_exec(Obj *stack, Obj* expr, Obj* env);
 int eval_expr(Obj expr, Obj env, Obj* result);
+int eval_do_bind(Obj* stack, Obj* expr, Obj* env);
+int eval_do_apply(Obj* stack, Obj* expr, Obj* env, Obj* result);
 
 char* _strdup(const char* s);
 Obj make_int(long x);
@@ -116,7 +123,9 @@ int builtin_add(Obj args, Obj* result);
 int builtin_sub(Obj args, Obj* result);
 int builtin_div(Obj args, Obj* result);
 int builtin_mul(Obj args, Obj* result);
-
+int builtin_eq(Obj args, Obj* result);
+int builtin_apply(Obj args, Obj* result);
+int builtin_pair(Obj args, Obj* result);
 
 void print_expr(Obj o);
 void load_file(Obj env, const char* path);
@@ -183,6 +192,75 @@ char* slurp(const char* path)
 /************* End Of Library functions *****************/
 
 /************* BUILT IN FUNCTIONS WHICH DO STUFF ************/
+
+int builtin_pair(Obj args, Obj* result)
+{
+
+	if (nilp(args) || !nilp(p2(args)))
+		return Error_Args;
+
+	*result = (p1(args).type == ObjType_Pair) ? make_sym("T") : nil;
+
+	return Error_OK;
+}
+
+
+int builtin_apply(Obj args, Obj* result)
+{
+	Obj fn;
+
+	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
+		return Error_Args;
+
+	fn = p1(args);
+	args = p1(p2(args));
+
+	if (!listp(args))
+			return Error_Syntax;
+
+	return apply(fn, args, result);
+}
+
+
+int builtin_eq(Obj args, Obj* result)
+{
+
+	Obj a, b;
+	bool eq = false;
+
+	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
+			return Error_Args;
+
+	a = p1(args);
+	b = p1(p2(args));
+
+	if (a.type == b.type)
+	{
+		switch (a.type)
+		{
+			case ObjType_Pair:
+			case ObjType_Closure:
+
+			case ObjType_Nil:
+				eq = true;
+				break;
+			case ObjType_Symbol:
+				eq = (a.value.symbol == b.value.symbol);
+				break;
+			case ObjType_Integer:
+				eq = (a.value.integer == b.value.integer);
+				break;
+			case ObjType_Builtin:
+				eq = (a.value.builtin == b.value.builtin);
+				break;
+		}
+	}
+
+	*result = eq ? make_sym("T") : nil;
+
+	return Error_OK;
+}
+
 int builtin_p1(Obj args, Obj* result)
 {
 
@@ -345,7 +423,10 @@ int builtin_sub(Obj args, Obj* result)
 
 	if (has_two_args)
 	{
-		/* We have a subtraction between A and B */
+		/*
+		 * We have a subtraction between A and B
+		 * eg: (- 10 2)
+		 * */
 		b = p1(p2(args));
 
 		if (a.type != ObjType_Integer || b.type != ObjType_Integer)
@@ -355,7 +436,10 @@ int builtin_sub(Obj args, Obj* result)
 	}
 	else
 	{
-		/* We have: - a  */
+		/*
+		 * We have: - a
+		 * eg (- 2)
+		 * */
 		if (a.type != ObjType_Integer)
 			return Error_Type;
 
@@ -412,6 +496,49 @@ int builtin_cons(Obj args, Obj* result)
 	return Error_OK;
 }
 /***************** END OF BUILT IN FUNCTION WHICH DO STUFF ****************/
+
+Obj list_get(Obj list, int k)
+{
+	while(k--)
+		list = p2(list);
+
+	return p1(list);
+}
+
+
+void list_set(Obj list, int k, Obj value)
+{
+	while (k--)
+		list = p2(list);
+
+	p1(list) = value;
+}
+
+
+void list_reverse(Obj* list)
+{
+	Obj tail = nil;
+	while(!nilp(*list))
+	{
+		Obj p = p2(*list);
+		p2(*list) = tail;
+		tail = *list;
+		*list = p;
+	}
+	*list = tail;
+}
+
+Obj make_frame(Obj parent, Obj env, Obj tail)
+{
+	return cons(parent,
+			cons(env,
+				cons(nil, // op
+					cons(tail,
+						cons(nil, // args
+							cons(nil, // body
+								nil))))));
+}
+
 
 int make_closure(Obj env, Obj args, Obj body, Obj* result)
 {
@@ -519,6 +646,77 @@ int apply(Obj fn, Obj args, Obj* result)
 	return Error_OK;
 
 }
+
+int eval_do_exec(Obj *stack, Obj* expr, Obj* env)
+{
+	Obj p;
+
+	*env = list_get(*stack, 1);
+	p = list_get(*stack, 5);
+	*expr = p1(p);
+	p = p2(p);
+
+	if(nilp(p))
+	{
+		/* Finish func, pop the stack */
+		*stack = p1(*stack);
+	}
+	else
+	{
+		list_set(*stack, 5, p);
+	}
+
+	return Error_OK;
+}
+
+int eval_do_bind(Obj* stack, Obj* expr, Obj* env)
+{
+	Obj op, args, arg_names, body;
+
+	body = list_get(*stack, 5);
+	if (!nilp(body))
+		return eval_do_bind(stack, expr, env);
+
+	op = list_get(*stack, 2);
+	args = list_get(*stack, 4);
+
+	*env = env_create(p1(op));
+	arg_names = p1(p2(op));
+	body = p2(p2(op));
+	list_set(*stack, 1, *env);
+	list_set(*stack, 5, body);
+
+	/* Bind args */
+	while (!nilp(arg_names))
+	{
+		if (arg_names.type == ObjType_Symbol)
+		{
+			env_set(*env, arg_names, args);
+			args = nil;
+			break;
+		}
+
+		if (nilp(args))
+			return Error_Args;
+
+		env_set(*env, p1(arg_names), p1(args));
+		arg_names = p2(arg_names);
+		args = p2(args);
+	}
+
+	if (!nilp(args))
+		return Error_Args;
+
+	list_set(*stack, 4, nil);
+
+	return eval_do_exec(stack, expr, env);
+}
+
+int eval_do_apply(Obj* stack, Obj* expr, Obj* env, Obj* result)
+{
+
+}
+
 
 int eval_expr(Obj expr, Obj env, Obj* result)
 {
@@ -989,6 +1187,9 @@ int main(int argc, char* argv[])
 	env_set(env, make_sym(">"), make_builtin(builtin_numgr));
 	env_set(env, make_sym(">="), make_builtin(builtin_numgroreq));
 	env_set(env, make_sym("<="), make_builtin(builtin_numlessoreq));
+	env_set(env, make_sym("EQ?"), make_builtin(builtin_eq));
+	env_set(env, make_sym("APPLY"), make_builtin(builtin_apply));
+	env_set(env, make_sym("PAIR?"), make_builtin(builtin_pair));
 
 	load_file(env, "library.lisp");
 
