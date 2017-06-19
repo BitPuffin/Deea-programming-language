@@ -116,7 +116,71 @@ int builtin_add(Obj args, Obj* result);
 int builtin_sub(Obj args, Obj* result);
 int builtin_div(Obj args, Obj* result);
 int builtin_mul(Obj args, Obj* result);
+
+
+void print_expr(Obj o);
+void load_file(Obj env, const char* path);
+char* slurp(const char* path);
+
 /************* END OF DECLARATIONS ****************/
+
+/************* Library functions *****************/
+
+void load_file(Obj env, const char* path)
+{
+	char* text;
+
+	printf("Reading %s...\n", path);
+	text = slurp(path);
+	if (text)
+	{
+		const char* p = text;
+		Obj expr;
+		while (read_expr(p, &p, &expr) == Error_OK)
+		{
+			Obj result;
+			Error err = eval_expr(expr, env, &result);
+			if (err)
+			{
+				printf("There was an error in expression:\n\t");
+				print_expr(expr);
+				putchar('\n');
+			}
+			else
+			{
+				print_expr(result);
+				putchar('\n');
+			}
+		}
+		free(text);
+	}
+}
+
+char* slurp(const char* path)
+{
+	FILE* file;
+	char* buf;
+	long len;
+
+	file = fopen(path, "r");
+	if (!file)
+		return NULL;
+
+	fseek(file, 0, SEEK_END);
+	len = ftell(file);
+	fseek(file, 0, SEEK_SET);
+
+	buf = malloc(len);
+	if (!buf)
+		return NULL;
+
+	fread(buf, 1, len, file);
+	fclose(file);
+
+	return buf;
+}
+
+/************* End Of Library functions *****************/
 
 /************* BUILT IN FUNCTIONS WHICH DO STUFF ************/
 int builtin_p1(Obj args, Obj* result)
@@ -269,18 +333,34 @@ int builtin_add(Obj args, Obj* result)
 int builtin_sub(Obj args, Obj* result)
 {
 	Obj a, b;
+	bool has_two_args = true;
 
-	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
+	if (nilp(args) )
 		return Error_Args;
 
+	if (nilp(p2(args)) || !nilp(p2(p2(args))))
+		has_two_args = false;
+
 	a = p1(args);
-	b = p1(p2(args));
 
-	if (a.type != ObjType_Integer || b.type != ObjType_Integer)
-		return Error_Type;
+	if (has_two_args)
+	{
+		/* We have a subtraction between A and B */
+		b = p1(p2(args));
 
-	*result = make_int (a.value.integer - b.value.integer);
+		if (a.type != ObjType_Integer || b.type != ObjType_Integer)
+			return Error_Type;
 
+		*result = make_int (a.value.integer - b.value.integer);
+	}
+	else
+	{
+		/* We have: - a  */
+		if (a.type != ObjType_Integer)
+			return Error_Type;
+
+		*result = make_int(-a.value.integer);
+	}
 	return Error_OK;
 }
 
@@ -909,6 +989,8 @@ int main(int argc, char* argv[])
 	env_set(env, make_sym(">"), make_builtin(builtin_numgr));
 	env_set(env, make_sym(">="), make_builtin(builtin_numgroreq));
 	env_set(env, make_sym("<="), make_builtin(builtin_numlessoreq));
+
+	load_file(env, "library.lisp");
 
 	while (fgets(input, 256, stdin) != NULL)
 	{
