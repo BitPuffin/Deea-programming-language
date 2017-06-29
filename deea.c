@@ -1,11 +1,5 @@
-/*
-#   deea programming language
-#
-#   Copyright (C) 2017 Muresan Vlad
-#
-#   This project is free software; you can redistribute it and/or modify it
-#   under the terms of the MIT license. See LICENSE.md for details.
-*/
+#include "deea.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -17,1136 +11,550 @@
 
 #define DEEA_VER "0.0.1"
 
-#define SAFE_FREE(v) {  if (v) {free(v); v = NULL;}  }
-#define p1(p) ((p).value.pair->obj[0])
-#define p2(p) ((p).value.pair->obj[1])
-/* p stands for predicate */
-#define nilp(obj) ((obj).type == ObjType_Nil)
-
-struct Obj;
-
-typedef int (*Builtin) (struct Obj, struct Obj* result);
-
-typedef struct Obj
+struct
 {
-
-	enum
-	{
-		ObjType_Nil,
-		ObjType_Pair,
-		ObjType_Symbol,
-		ObjType_Integer,
-		ObjType_Builtin,
-		ObjType_Closure
-	} type;
-
-	union
-	{
-		struct Pair *pair;
-		const char* symbol;
-		long integer;
-		Builtin builtin;
-	} value;
-
-} Obj;
-
-struct Pair
-{
-	struct Obj obj[2];
-};
-
-static const Obj nil = { ObjType_Nil };
-static Obj sym_table = {ObjType_Nil };
+	bool running;
+} moduleData;
 
 typedef enum
 {
-	Error_OK = 0,
-	Error_Syntax = 1,
-	/*
-	 * Attempted to evaluate a symbol
-	 * for which no bindings exists
-	 */
-	Error_Unbound = 2,
-	/*
-	 * A list expression was shorter or longer
-	 * than expected
-	 */
-	Error_Args = 3,
-	/*
-	 * An object in a expression was of
-	 * a different type than expected
-	 */
-	Error_Type = 4,
-} Error;
+	FIXNUM,
+	BOOLEAN,
+	CHARACTER,
+	STRING,
+	EMPTY_LIST,
+	PAIR
 
+} object_type;
 
-/************* START OF DECLARATIONS ****************/
-int read_expr(const char* input, const char** end, Obj* result);
-int read_list(const char* start, const char** end, Obj* result);
-int parse_simple(const char* start, const char* end, Obj* result);
-int lexer(const char* str, const char** start, const char** end);
-int listp(Obj expr);
-Obj list_get(Obj list, int k);
-void list_set(Obj list, int k, Obj value);
-void list_reverse(Obj* list);
-Obj make_frame(Obj parent, Obj env, Obj tail);
+typedef struct object {
 
-Obj env_create(Obj parent);
-int env_set(Obj env, Obj symbol, Obj value);
-int env_get(Obj env, Obj symbol, Obj* result);
+	object_type type;
 
-int eval_do_exec(Obj *stack, Obj* expr, Obj* env);
-int eval_expr(Obj expr, Obj env, Obj* result);
-int eval_do_bind(Obj* stack, Obj* expr, Obj* env);
-int eval_do_apply(Obj* stack, Obj* expr, Obj* env, Obj* result);
-
-char* _strdup(const char* s);
-Obj make_int(long x);
-Obj make_sym(const char* s);
-Obj cons(Obj car_val, Obj cdr_val);
-
-Obj make_builtin(Builtin fn);
-Obj copy_list(Obj list);
-int apply(Obj fn, Obj args, Obj* result);
-
-int make_closure(Obj env, Obj args, Obj body, Obj* result);
-
-int builtin_numless(Obj args, Obj* result);
-int builtin_numgr(Obj args, Obj* result);
-int builtin_numlessoreq(Obj args, Obj* result);
-int builtin_numgroreq(Obj args, Obj* result);
-int builtin_numeq(Obj args, Obj* result);
-int builtin_p1(Obj args, Obj* result);
-int builtin_p2(Obj args, Obj* result);
-int builtin_cons(Obj args, Obj* result);
-int builtin_add(Obj args, Obj* result);
-int builtin_sub(Obj args, Obj* result);
-int builtin_div(Obj args, Obj* result);
-int builtin_mul(Obj args, Obj* result);
-int builtin_eq(Obj args, Obj* result);
-int builtin_apply(Obj args, Obj* result);
-int builtin_pair(Obj args, Obj* result);
-
-void print_expr(Obj o);
-void load_file(Obj env, const char* path);
-char* slurp(const char* path);
-
-/************* END OF DECLARATIONS ****************/
-
-/************* Library functions *****************/
-
-void load_file(Obj env, const char* path)
-{
-	char* text;
-
-	printf("Reading %s...\n", path);
-	text = slurp(path);
-	if (text)
+	union
 	{
-		const char* p = text;
-		Obj expr;
-		while (read_expr(p, &p, &expr) == Error_OK)
+
+		struct
 		{
-			Obj result;
-			Error err = eval_expr(expr, env, &result);
-			if (err)
-			{
-				printf("There was an error in expression:\n\t");
-				print_expr(expr);
-				putchar('\n');
-			}
-			else
-			{
-				print_expr(result);
-				putchar('\n');
-			}
-		}
-		free(text);
-	}
-}
+			bool value;
+		} boolean;
 
-char* slurp(const char* path)
-{
-	FILE* file;
-	char* buf;
-	long len;
-
-	file = fopen(path, "r");
-	if (!file)
-		return NULL;
-
-	fseek(file, 0, SEEK_END);
-	len = ftell(file);
-	fseek(file, 0, SEEK_SET);
-
-	buf = malloc(len);
-	if (!buf)
-		return NULL;
-
-	fread(buf, 1, len, file);
-	fclose(file);
-
-	return buf;
-}
-
-/************* End Of Library functions *****************/
-
-/************* BUILT IN FUNCTIONS WHICH DO STUFF ************/
-
-int builtin_pair(Obj args, Obj* result)
-{
-
-	if (nilp(args) || !nilp(p2(args)))
-		return Error_Args;
-
-	*result = (p1(args).type == ObjType_Pair) ? make_sym("T") : nil;
-
-	return Error_OK;
-}
-
-
-int builtin_apply(Obj args, Obj* result)
-{
-	Obj fn;
-
-	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
-		return Error_Args;
-
-	fn = p1(args);
-	args = p1(p2(args));
-
-	if (!listp(args))
-			return Error_Syntax;
-
-	return apply(fn, args, result);
-}
-
-
-int builtin_eq(Obj args, Obj* result)
-{
-
-	Obj a, b;
-	bool eq = false;
-
-	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
-			return Error_Args;
-
-	a = p1(args);
-	b = p1(p2(args));
-
-	if (a.type == b.type)
-	{
-		switch (a.type)
+		struct
 		{
-			case ObjType_Pair:
-			case ObjType_Closure:
+			char* value;
+		} string;
 
-			case ObjType_Nil:
-				eq = true;
-				break;
-			case ObjType_Symbol:
-				eq = (a.value.symbol == b.value.symbol);
-				break;
-			case ObjType_Integer:
-				eq = (a.value.integer == b.value.integer);
-				break;
-			case ObjType_Builtin:
-				eq = (a.value.builtin == b.value.builtin);
-				break;
-		}
-	}
-
-	*result = eq ? make_sym("T") : nil;
-
-	return Error_OK;
-}
-
-int builtin_p1(Obj args, Obj* result)
-{
-
-	if(nilp(args) || !nilp(p2(args)))
-		return Error_Args;
-
-	if (nilp(p1(args)))
-		*result = nil;
-	else if (p1(args).type != ObjType_Pair)
-		return Error_Type;
-	else
-		*result = p1(p1(args));
-
-	return Error_OK;
-}
-
-
-int builtin_p2(Obj args, Obj* result)
-{
-
-	if (nilp(args) || !nilp(p2(args)))
-		return Error_Args;
-
-	if (nilp(p1(args)))
-		*result = nil;
-	else if (p1(args).type != ObjType_Pair)
-		return Error_Type;
-	else
-		*result = p2(p1(args));
-
-	return Error_OK;
-}
-
-
-int builtin_numless(Obj args, Obj* result)
-{
-	Obj a, b;
-
-	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
-		return Error_Args;
-
-	a = p1(args);
-	b = p1(p2(args));
-
-	if (a.type != ObjType_Integer || b.type != ObjType_Integer)
-		return Error_Type;
-
-	* result = (a.value.integer < b.value.integer) ? make_sym("T") : nil;
-
-	return Error_OK;
-}
-
-
-int builtin_numgr(Obj args, Obj* result)
-{
-	Obj a, b;
-
-	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
-		return Error_Args;
-
-	a = p1(args);
-	b = p1(p2(args));
-
-	if (a.type != ObjType_Integer || b.type != ObjType_Integer)
-		return Error_Type;
-
-	* result = (a.value.integer > b.value.integer) ? make_sym("T") : nil;
-
-	return Error_OK;
-}
-
-
-int builtin_numlessoreq(Obj args, Obj* result)
-{
-	Obj a, b;
-
-	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
-		return Error_Args;
-
-	a = p1(args);
-	b = p1(p2(args));
-
-	if (a.type != ObjType_Integer || b.type != ObjType_Integer)
-		return Error_Type;
-
-	* result = (a.value.integer <= b.value.integer) ? make_sym("T") : nil;
-
-	return Error_OK;
-}
-
-
-int builtin_numgroreq(Obj args, Obj* result)
-{
-	Obj a, b;
-
-	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
-		return Error_Args;
-
-	a = p1(args);
-	b = p1(p2(args));
-
-	if (a.type != ObjType_Integer || b.type != ObjType_Integer)
-		return Error_Type;
-
-	* result = (a.value.integer >= b.value.integer) ? make_sym("T") : nil;
-
-	return Error_OK;
-}
-
-
-int builtin_numeq(Obj args, Obj* result)
-{
-	Obj a, b;
-
-	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
-		return Error_Args;
-
-	a = p1(args);
-	b = p1(p2(args));
-
-	if (a.type != ObjType_Integer || b.type != ObjType_Integer)
-		return Error_Type;
-
-	* result = (a.value.integer == b.value.integer) ? make_sym("T") : nil;
-
-	return Error_OK;
-
-}
-
-int builtin_add(Obj args, Obj* result)
-{
-	Obj a, b;
-
-	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
-		return Error_Args;
-
-	a = p1(args);
-	b = p1(p2(args));
-
-	if (a.type != ObjType_Integer || b.type != ObjType_Integer)
-		return Error_Type;
-
-	*result = make_int (a.value.integer + b.value.integer);
-
-	return Error_OK;
-}
-
-int builtin_sub(Obj args, Obj* result)
-{
-	Obj a, b;
-	bool has_two_args = true;
-
-	if (nilp(args) )
-		return Error_Args;
-
-	if (nilp(p2(args)) || !nilp(p2(p2(args))))
-		has_two_args = false;
-
-	a = p1(args);
-
-	if (has_two_args)
-	{
-		/*
-		 * We have a subtraction between A and B
-		 * eg: (- 10 2)
-		 * */
-		b = p1(p2(args));
-
-		if (a.type != ObjType_Integer || b.type != ObjType_Integer)
-			return Error_Type;
-
-		*result = make_int (a.value.integer - b.value.integer);
-	}
-	else
-	{
-		/*
-		 * We have: - a
-		 * eg (- 2)
-		 * */
-		if (a.type != ObjType_Integer)
-			return Error_Type;
-
-		*result = make_int(-a.value.integer);
-	}
-	return Error_OK;
-}
-
-int builtin_mul(Obj args, Obj* result)
-{
-	Obj a, b;
-
-	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
-		return Error_Args;
-
-	a = p1(args);
-	b = p1(p2(args));
-
-	if (a.type != ObjType_Integer || b.type != ObjType_Integer)
-		return Error_Type;
-
-	*result = make_int (a.value.integer * b.value.integer);
-
-	return Error_OK;
-}
-
-int builtin_div(Obj args, Obj* result)
-{
-	Obj a, b;
-
-	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
-		return Error_Args;
-
-	a = p1(args);
-	b = p1(p2(args));
-
-	if (a.type != ObjType_Integer || b.type != ObjType_Integer)
-		return Error_Type;
-
-	*result = make_int (a.value.integer / b.value.integer);
-
-	return Error_OK;
-}
-
-
-int builtin_cons(Obj args, Obj* result)
-{
-
-	if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
-		return Error_Args;
-
-	*result = cons(p1(args), p1(p2(args)));
-
-	return Error_OK;
-}
-/***************** END OF BUILT IN FUNCTION WHICH DO STUFF ****************/
-
-Obj list_get(Obj list, int k)
-{
-	while(k--)
-		list = p2(list);
-
-	return p1(list);
-}
-
-
-void list_set(Obj list, int k, Obj value)
-{
-	while (k--)
-		list = p2(list);
-
-	p1(list) = value;
-}
-
-
-void list_reverse(Obj* list)
-{
-	Obj tail = nil;
-	while(!nilp(*list))
-	{
-		Obj p = p2(*list);
-		p2(*list) = tail;
-		tail = *list;
-		*list = p;
-	}
-	*list = tail;
-}
-
-Obj make_frame(Obj parent, Obj env, Obj tail)
-{
-	return cons(parent,
-			cons(env,
-				cons(nil, // op
-					cons(tail,
-						cons(nil, // args
-							cons(nil, // body
-								nil))))));
-}
-
-
-int make_closure(Obj env, Obj args, Obj body, Obj* result)
-{
-	Obj p;
-
-	if (!listp(body))
-		return Error_Syntax;
-
-	/* Check argument names are all symbols */
-	p = args;
-	while(!nilp(p))
-	{
-
-		if (p.type == ObjType_Symbol)
-			break;
-		else if (p.type != ObjType_Pair || p1(p).type != ObjType_Symbol)
-			return Error_Type;
-
-		p = p2(p);
-	}
-
-	*result = cons(env, cons(args, body));
-	/* Override default 'Pair' type */
-	result->type = ObjType_Closure;
-
-	return Error_OK;
-
-}
-
-Obj make_builtin(Builtin fn)
-{
-	Obj a;
-	a.type = ObjType_Builtin;
-	a.value.builtin = fn;
-	return a;
-}
-
-Obj copy_list(Obj list)
-{
-	Obj a, p;
-	if (nilp(list))
-		return nil;
-
-	a = cons(p1(list), nil);
-	p = a;
-	list = p2(list);
-
-	while(!nilp(list))
-	{
-		p2(p) = cons(p1(list), nil);
-		p = p2(p);
-		list = p2(list);
-	}
-
-	return a;
-}
-
-int apply(Obj fn, Obj args, Obj* result)
-{
-
-	Obj env, args_names, body;
-
-	if (fn.type == ObjType_Builtin)
-		return (*fn.value.builtin)(args, result);
-	else if (fn.type != ObjType_Closure)
-		return Error_Type;
-
-	env = env_create(p1(fn));
-	args_names = p1(p2(fn));
-	body = p2(p2(fn));
-
-	/* Bind arguments */
-	while (!nilp(args_names))
-	{
-
-		if (args_names.type == ObjType_Symbol)
+		struct
 		{
-			env_set(env, args_names, args);
-			args = nil;
-			break;
-		}
+			char value;
+		} character;
 
-		if (nilp(args))
-			return Error_Args;
-
-		env_set(env, p1(args_names), p1(args));
-		args_names = p2(args_names);
-
-		args = p2(args);
-	}
-
-	if (!nilp(args))
-		return Error_Args;
-
-	/* Evaluate the body */
-	while(!nilp(body))
-	{
-		Error err = eval_expr(p1(body), env, result);
-		if(err)
-			return err;
-
-		body = p2(body);
-	}
-
-	return Error_OK;
-
-}
-
-int eval_do_exec(Obj *stack, Obj* expr, Obj* env)
-{
-	Obj p;
-
-	*env = list_get(*stack, 1);
-	p = list_get(*stack, 5);
-	*expr = p1(p);
-	p = p2(p);
-
-	if(nilp(p))
-	{
-		/* Finish func, pop the stack */
-		*stack = p1(*stack);
-	}
-	else
-	{
-		list_set(*stack, 5, p);
-	}
-
-	return Error_OK;
-}
-
-int eval_do_bind(Obj* stack, Obj* expr, Obj* env)
-{
-	Obj op, args, arg_names, body;
-
-	body = list_get(*stack, 5);
-	if (!nilp(body))
-		return eval_do_bind(stack, expr, env);
-
-	op = list_get(*stack, 2);
-	args = list_get(*stack, 4);
-
-	*env = env_create(p1(op));
-	arg_names = p1(p2(op));
-	body = p2(p2(op));
-	list_set(*stack, 1, *env);
-	list_set(*stack, 5, body);
-
-	/* Bind args */
-	while (!nilp(arg_names))
-	{
-		if (arg_names.type == ObjType_Symbol)
+		struct
 		{
-			env_set(*env, arg_names, args);
-			args = nil;
-			break;
-		}
+			long value;
+		} fixnum;
 
-		if (nilp(args))
-			return Error_Args;
-
-		env_set(*env, p1(arg_names), p1(args));
-		arg_names = p2(arg_names);
-		args = p2(args);
-	}
-
-	if (!nilp(args))
-		return Error_Args;
-
-	list_set(*stack, 4, nil);
-
-	return eval_do_exec(stack, expr, env);
-}
-
-int eval_do_apply(Obj* stack, Obj* expr, Obj* env, Obj* result)
-{
-
-}
-
-
-int eval_expr(Obj expr, Obj env, Obj* result)
-{
-	Obj op, args, p;
-	Error err;
-
-	if (expr.type == ObjType_Symbol)
-	{
-		return env_get(env, expr, result);
-	}
-	else if (expr.type != ObjType_Pair)
-	{
-		*result = expr;
-		return Error_OK;
-	}
-
-	if (!listp(expr))
-		return Error_Syntax;
-
-	op = p1(expr);
-	args = p2(expr);
-
-	if (op.type == ObjType_Symbol)
-	{
-		if (strcmp(op.value.symbol, "QUOTE") == 0)
+		struct
 		{
-			if(nilp(args) || !nilp(p2(args)))
-				return Error_Args;
+			struct object *car;
+			struct object *cdr;
+		} pair;
 
-			*result = p1(args);
-			return Error_OK;
-		}
-		else if (strcmp(op.value.symbol, "LAMBDA") == 0)
-		{
-			if (nilp(args) || nilp(p2(args)))
-				return Error_Args;
+	} data;
 
-			return make_closure(env, p1(args), p2(args), result);
-		}
-		else if (strcmp(op.value.symbol, "IF") == 0)
-		{
-			Obj cond, val;
+} object;
 
-			if (nilp(args) || nilp(p2(args)) || nilp(p2(p2(args))) || !nilp(p2(p2(p2(args)))))
-				return Error_Args;
+object* o_is_false;
+object* o_is_true;
+object* o_empty_list;
 
-			err = eval_expr(p1(args), env, &cond);
-			if (err)
-				return err;
+static object *allocate_object(void)
+{
+	object* obj;
 
-			val = nilp(cond) ? p1(p2(p2(args))) : p1(p2(args));
-			return eval_expr(val, env, result);
-
-		}
-		else if (strcmp(op.value.symbol, "DEFINE") == 0)
-		{
-			Obj sym, val;
-
-			if (nilp(args) || nilp(p2(args)) || !nilp(p2(p2(args))))
-				return Error_Args;
-
-			sym = p1(args);
-
-			if (sym.type == ObjType_Pair)
-			{
-				err = make_closure(env, p2(sym), p2(args), &val);
-				sym = p1(sym);
-				if (sym.type != ObjType_Symbol)
-					return Error_Type;
-			} else if (sym.type == ObjType_Symbol)
-			{
-				if (!nilp(p2(args)))
-					return Error_Args;
-				err = eval_expr(p1(p2(args)), env, &val);
-			} else
-				return Error_Type;
-
-			if (err)
-				return err;
-
-			*result = sym;
-			return env_set(env, sym, val);
-		}
-	}
-
-	/* Evaluate operators */
-	err = eval_expr(op, env, &op);
-	if (err)
-		return err;
-
-	/* Evaluate arguments */
-	args = copy_list(args);
-	p = args;
-	while(!nilp(p))
+	obj = malloc(sizeof(object));
+	if (obj == NULL)
 	{
-		err = eval_expr(p1(p), env, &p1(p));
-		if (err)
-			return err;
-
-		p = p2(p);
+		fprintf(stderr, "out of memory!");
 	}
-
-	return apply(op, args, result);
+	return obj;
 }
 
-int listp(Obj expr)
+static object* make_fixnum(long value)
 {
-	while (!nilp(expr))
-	{
-		if (expr.type != ObjType_Pair)
-		{
-			return 0;
-		}
-		expr = p2(expr);
-	}
-	return 1;
-}
+	object* o;
 
-Obj env_create(Obj parent)
-{
-	return cons(parent, nil);
-}
-
-int env_get(Obj env, Obj symbol, Obj* result)
-{
-	Obj parent = p1(env);
-	Obj bs = p2(env);
-
-	while(!nilp(bs))
-	{
-		Obj b = p1(bs);
-		if (p1(b).value.symbol == symbol.value.symbol)
-		{
-			*result = p2(b);
-			return Error_OK;
-		}
-		bs = p2(bs);
-	}
-	if (nilp(parent))
-		return Error_Unbound;
-
-	return env_get(parent, symbol, result);
-}
-
-int env_set(Obj env, Obj symbol, Obj value)
-{
-	Obj bs = p2(env);
-	Obj b = nil;
-
-	while (!nilp(bs))
-	{
-		b = p1(bs);
-		if (p1(b).value.symbol == symbol.value.symbol)
-		{
-			p2(b) = value;
-			return Error_OK;
-		}
-		bs = p2(bs);
-	}
-
-	b = cons(symbol, value);
-	p2(env) = cons(b, p2(env));
-
-	return Error_OK;
-}
-
-int lexer(const char* str, const char** start, const char** end)
-{
-
-	const char* ws = " \t\n";
-	const char* delim = "() \t\n";
-	const char* prefix = "()\'";
-
-	str += strspn(str, ws);
-
-	if (str[0] == '\0')
-	{
-		*start = *end = NULL;
-		return Error_Syntax;
-	}
-
-	*start = str;
-
-	if (strchr(prefix, str[0] ) != NULL)
-	{
-
-		*end = str+1;
-	}
-	else
-	{
-		*end = str + strcspn(str, delim);
-	}
-
-	return Error_OK;
-}
-
-
-int read_expr(const char* input, const char** end, Obj* result)
-{
-
-	const char* token;
-	Error err;
-
-	err = lexer(input, &token, end);
-	if (err)
-		return err;
-
-	if (token[0] == '(')
-	{
-		return read_list(*end, end, result);
-	}
-	else if (token[0] == ')')
-	{
-		return Error_Syntax;
-	}
-	else if (token[0] == '\'')
-	{
-		*result = cons(make_sym("QUOTE"), cons (nil,nil));
-		return read_expr(*end, end, &p1(p2(*result)));
-	}
-	else
-	{
-		return parse_simple(token, *end, result);
-	}
-}
-
-/*
- * Used for:
- * integers, symbols , nil
- */
-int parse_simple(const char* start, const char* end, Obj* result)
-{
-	char* buf, *p;
-
-	/* Integer? */
-	long val = strtol(start, &p, 10);
-	if (p == end)
-	{
-		result->type = ObjType_Integer;
-		result->value.integer = val;
-		return Error_OK;
-	}
-
-	/* nil or symbol */
-	buf = malloc(end - start+ 1);
-	p = buf;
-
-	while (start != end)
-	{
-		*p++ = toupper(*start);
-		++start;
-	}
-	*p = '\0';
-
-	if (strcmp(buf, "NIL") == 0)
-		*result = nil;
-	else
-		*result = make_sym(buf);
-
-	free(buf);
-
-	return Error_OK;
-}
-
-int read_list(const char* start, const char** end, Obj* result)
-{
-
-	Obj p;
-
-	*end = start;
-	p = *result = nil;
-
-	for (;;)
-	{
-		const char* token;
-		Obj item;
-		Error err;
-
-		err = lexer(*end, &token, end);
-
-		if (err)
-			return err;
-
-		if (token [0] == ')')
-			return Error_OK;
-
-		if (token [0] == '.' && *end - token == 1)
-		{
-			/* Not a good list */
-			if (nilp(p))
-				return Error_Syntax;
-
-			err = read_expr(*end, end, &item);
-
-			if (err)
-				return err;
-
-			p2(p) = item;
-
-			/* Read the closing ')' */
-			err = lexer(*end, &token, end);
-			if (!err && token[0] != ')')
-				err = Error_Syntax;
-
-			return err;
-		}
-
-		err = read_expr(token, end, &item);
-		if (err)
-			return err;
-
-		if (nilp(p))
-		{
-			/* First item */
-			*result = cons(item, nil);
-			p = *result;
-		}
-		else
-		{
-			p2(p) = cons(item, nil);
-			p = p2(p);
-		}
-
-	}
-}
-
-/*
- * Allocate a pair on heap and assign its two elements
- */
-Obj cons(Obj car_val, Obj cdr_val)
-{
-	Obj o;
-
-	o.type = ObjType_Pair;
-	o.value.pair = malloc(sizeof(struct Pair));
-
-	p1(o) = car_val;
-	p2(o) = cdr_val;
+	o = allocate_object();
+	o->type = FIXNUM;
+	o->data.fixnum.value = value;
 
 	return o;
 }
 
-Obj make_int(long x)
+static bool is_boolean(object* obj)
 {
-	Obj a;
-	a.type = ObjType_Integer;
-	a.value.integer = x;
-	return a;
+	return (obj->type == BOOLEAN);
 }
 
-char* _strdup(const char* s)
+static bool is_false(object* obj)
 {
-	char* d = malloc(strlen(s) + 1);
-	if (d == NULL) return NULL;
-	strcpy(d, s);
-
-	return d;
+	return obj == o_is_false;
 }
 
-Obj make_sym(const char* s)
+static bool is_true(object* obj)
 {
-	Obj a, p;
+	return obj == o_is_true;
+}
 
-	p = sym_table;
-	/*
-	 * Here we check for another symbol
-	 * with the same name as 's' and
-	 * if it exists then we return it
-	 * and not allocate new memory to
-	 * the heap
-	 */
-	while (!nilp(p))
+static bool is_empty_list(object* obj)
+{
+	return obj == o_empty_list;
+}
+
+static bool is_fixnum(object* obj)
+{
+	return (obj->type == FIXNUM);
+}
+
+static object* make_character(char value)
+{
+	object* obj;
+
+	obj = allocate_object();
+	obj->type = CHARACTER;
+	obj->data.character.value = value;
+
+	return obj;
+}
+
+static object* make_string(char* value)
+{
+	object* obj;
+
+	obj = allocate_object();
+	obj->type = STRING;
+	obj->data.string.value = malloc(strlen(value) + 1);
+	if (obj->data.string.value == NULL)
 	{
-		a = p1(p);
-		if (strcmp(a.value.symbol, s) == 0)
-			return a;
+		fprintf(stderr, "out of memory for allocatin string \n");
+		moduleData.running = false;
+	}
+	strcpy(obj->data.string.value, value);
+	return obj;
+}
 
-		p = p2(p);
+static object* cons(object* car, object* cdr)
+{
+	object* obj;
+
+	obj = allocate_object();
+	obj->type = PAIR;
+	obj->data.pair.car = car;
+	obj->data.pair.cdr = cdr;
+
+	return obj;
+}
+
+static object* car(object* pair)
+{
+	return pair->data.pair.car;
+}
+
+void set_car(object* obj, object* value)
+{
+	obj->data.pair.car = value;
+}
+
+static object* cdr(object* pair)
+{
+	return pair->data.pair.cdr;
+}
+
+void set_cdr(object* obj, object* value)
+{
+	obj->data.pair.cdr = value;
+}
+
+static bool is_string(object* obj)
+{
+	return obj->type == STRING;
+}
+
+static void init(void)
+{
+	o_is_false = allocate_object();
+	o_is_false->type = BOOLEAN;
+	o_is_false->data.boolean.value = false;
+
+	o_is_true = allocate_object();
+	o_is_true->type = BOOLEAN;
+	o_is_true->data.boolean.value = true;
+
+	o_empty_list = allocate_object();
+	o_empty_list->type = EMPTY_LIST;
+
+}
+
+static bool is_delimiter(int c)
+{
+	return isspace(c) || c == EOF || c == '(' || c == ')' ||
+		c == ';' || c == '"';
+}
+
+static int peek(FILE* in)
+{
+	int c;
+
+	c = getc(in);
+	ungetc(c, in);
+
+	return c;
+}
+
+static void eat_string(FILE* in, char* str)
+{
+	int c;
+
+	while(*str != '\0')
+	{
+		c = getc(in);
+		if (c != *str)
+		{
+			fprintf(stderr, "unexpected character '%c'\n", c);
+			moduleData.running = false;
+		}
+		str++;
+	}
+}
+
+static void eat_whitespace(FILE* in)
+{
+	int c;
+
+	while((c = getc(in)) != EOF)
+	{
+		if (isspace(c))
+			continue;
+		else if (c == ';') {
+			/* treat it like a whitespace */
+			while (((c = getc(in)) != EOF) && (c != '\n'));
+			continue;
+		}
+
+		ungetc(c, in);
+		break;
+	}
+}
+
+static void peek_expected_delimiter(FILE* in)
+{
+	if (!is_delimiter(peek(in)))
+	{
+		fprintf(stderr, "character not followed by delimiter \n");
+		moduleData.running = false;
+	}
+}
+
+static object* read_character(FILE* in)
+{
+	int c;
+
+	c = getc(in);
+
+	switch(c)
+	{
+		case EOF:
+			fprintf(stderr, "incomplete character literal \n");
+			moduleData.running = false;
+			break;
+		case 's':
+			if (peek(in) == 'p')
+			{
+				eat_string(in, "pace");
+				peek_expected_delimiter(in);
+				return make_character(' ');
+			}
+			break;
+
+		case 'n':
+			if (peek(in) == 'e')
+			{
+				eat_string(in, "ewline");
+				peek_expected_delimiter(in);
+				return make_character('\n');
+			}
+			break;
 	}
 
-	a.type = ObjType_Symbol;
-	a.value.symbol = _strdup(s);
-	sym_table = cons(a, sym_table);
-
-	return a;
+	peek_expected_delimiter(in);
+	return make_character(c);
 }
 
-/*
- * Example of pair:
- * ( a . b)
- * a = car
- * b = cdr
- */
+static object* read(FILE* in);
 
-void print_expr(Obj o)
+object* read_pair(FILE* in)
 {
-	switch(o.type)
+	int c;
+
+	object* car_obj;
+	object* cdr_obj;
+
+	eat_whitespace(in);
+
+	c = getc(in);
+
+	if (c == ')') /* empty list */
+		return o_empty_list;
+
+	ungetc(c, in);
+
+	car_obj = read(in);
+
+	eat_whitespace(in);
+
+	c = getc(in);
+
+	if (c == '.') /* read improper list */
 	{
-		case ObjType_Nil:
-			printf("NIL");
-			break;
-		case ObjType_Pair:
-			putchar('(');
-			print_expr(p1(o));
-			o = p2(o);
-			while (!nilp(o))
+		c = peek(in);
+		if (!is_delimiter(c))
+		{
+			fprintf(stderr, "dot not followed by delimitator\n");
+			moduleData.running = false;
+		}
+
+		cdr_obj = read(in);
+		eat_whitespace(in);
+		c = getc(in);
+
+		if (c != ')')
+		{
+			fprintf(stderr, "missing right paren\n");
+			moduleData.running = false;
+		}
+		return cons(car_obj, cdr_obj);
+	}
+	else
+	{
+		/* read list */
+		ungetc(c, in);
+		cdr_obj = read_pair(in);
+		return cons(car_obj, cdr_obj);
+	}
+
+}
+
+object* read(FILE* in)
+{
+
+	int c;
+	int8_t sign = 1;
+	long num = 0;
+	int i;
+
+	#define BUFFER_MAX 1000
+	char buffer[BUFFER_MAX];
+
+	eat_whitespace(in);
+
+	c = getc(in);
+
+
+	if (c == '#')
+	{
+		/* read boolean or character */
+		c = getc(in);
+		switch(c)
+		{
+			case 't':
+				return o_is_true;
+				break;
+
+			case 'f':
+				return o_is_false;
+				break;
+
+			case '\\':
+				return read_character(in);
+
+			default:
+				fprintf(stderr, "unknown boolean or character literal \n");
+
+				moduleData.running = false;
+				break;
+		}
+	}
+	else if (c == '"')
+	{
+		/* read string */
+		i = 0;
+		while((c = getc(in)) != '"')
+		{
+			if (c == '\\')
 			{
-				if (o.type == ObjType_Pair)
-				{
-					putchar(' ');
-					print_expr(p1(o));
-					o = p2(o);
-				}
-				else
-				{
-					printf(" . ");
-					print_expr(o);
-					break;
-				}
+				c = getc(in);
+				if (c == 'n')
+					c = '\n';
 			}
-			putchar(')');
+
+			if (c == EOF)
+			{
+				fprintf(stderr, "non-terminated string literal \n");
+				moduleData.running = false;
+			}
+			if (i < BUFFER_MAX - 1)
+				buffer[i++] = c; // we want to keep BUFFER_MAX to \0
+			else
+			{
+				fprintf(stderr, "string too long. Maximum length is %d\n", BUFFER_MAX);
+				moduleData.running = false;
+			}
+		}
+		buffer[i] = '\0';
+		return make_string(buffer);
+	}
+	else if (c == '(')
+	{
+		return read_pair(in);
+	}
+	else if (isdigit(c) || (c == '-' && (isdigit(peek(in)))))
+	{
+		/* read a fixnum */
+		if (c == '-')
+		{
+			sign = -1;
+		}
+		else
+			ungetc(c, in);
+
+		while (isdigit(c = getc(in)))
+			num = (num * 10) + (c - '0');
+
+		num *= sign;
+
+		if (is_delimiter(c))
+		{
+			ungetc(c, in);
+			return make_fixnum(num);
+		}
+		else
+		{
+			fprintf(stderr, "number not followed by a delimiter!");
+			moduleData.running = false;
+		}
+
+	}
+	else
+	{
+		fprintf(stderr, "unexpected '%c' \n", c);
+		moduleData.running = false;
+	}
+	fprintf(stderr, "read illegal state \n");
+	moduleData.running = false;
+}
+
+static object* eval (object* exp)
+{
+	return exp;
+}
+
+static void write(object* obj);
+
+static void write_pair(object* obj)
+{
+	object* car_obj;
+	object* cdr_obj;
+
+	car_obj = car(obj);
+	cdr_obj = cdr(obj);
+
+	write(car_obj);
+
+	if (cdr_obj->type == PAIR)
+	{
+		printf(" ");
+		write_pair(cdr_obj);
+	}
+	else if (cdr_obj->type == EMPTY_LIST)
+		return;
+	else
+	{
+		printf(" . ");
+		write(cdr_obj);
+	}
+}
+
+void write(object* obj)
+{
+	char c;
+	char *str;
+
+	switch(obj->type)
+	{
+		case EMPTY_LIST:
+			printf("()");
 			break;
-		case ObjType_Symbol:
-			printf("%s \n", o.value.symbol);
+
+		case FIXNUM:
+			printf("%ld", obj->data.fixnum.value);
 			break;
-		case ObjType_Integer:
-			printf("%ld \n", o.value.integer);
+
+		case BOOLEAN:
+			printf("#%c", is_false(obj) ? 'f' : 't');
 			break;
-		case ObjType_Builtin:
-			printf("#<BUILTIN:%p>", o.value.builtin);
+
+		case PAIR:
+			printf("(");
+			write_pair(obj);
+			printf(")");
+			break;
+
+		case CHARACTER:
+			c = obj->data.character.value;
+			printf("#\\");
+
+			switch(c)
+			{
+				case '\n':
+					printf("newline");
+				break;
+
+				case ' ':
+					printf("space");
+					break;
+
+				default:
+					putchar(c);
+			}
+			break;
+
+		case STRING:
+			str = obj->data.string.value;
+			putchar('"');
+			while(*str != '\0')
+			{
+				switch(*str)
+				{
+					case '\n':
+						printf("\\n");
+						break;
+					case '\\':
+						printf("\\\\");
+						break;
+					case '"':
+						printf("\\\"");
+						break;
+					default:
+						putchar(*str);
+				}
+				str++;
+			}
+			putchar('"');
+			break;
+
+		default:
+			fprintf(stderr, "cannot write, unknown type \n");
+			moduleData.running = false;
 			break;
 	}
 }
@@ -1154,75 +562,17 @@ void print_expr(Obj o)
 int main(int argc, char* argv[])
 {
 
-	/*
-	Obj o;
+	printf("Welcome to Deea. Press ctrl-c to exit. \n");
 
-	o = make_int(42);
-	print_expr(o);
+	moduleData.running = true;
 
-	o = make_sym("FOO");
-	print_expr(o);
+	init();
 
-	o = cons(make_int(1),  cons(make_int(2), cons(make_int(3), nil)));
-	print_expr(o);
-	*/
-
-	//char* input = "(42 foo)";
-	char input[256];
-
-	Obj env;
-	env = env_create(nil);
-
-	/* Set initial env */
-	env_set(env, make_sym("CAR"), make_builtin(builtin_p1));
-	env_set(env, make_sym("CDR"), make_builtin(builtin_p2));
-	env_set(env, make_sym("CONS"), make_builtin(builtin_cons));
-	env_set(env, make_sym("+"), make_builtin(builtin_add));
-	env_set(env, make_sym("-"), make_builtin(builtin_sub));
-	env_set(env, make_sym("*"), make_builtin(builtin_mul));
-	env_set(env, make_sym("/"), make_builtin(builtin_div));
-	env_set(env, make_sym("T"), make_sym("T"));
-	env_set(env, make_sym("="), make_builtin(builtin_numeq));
-	env_set(env, make_sym("<"), make_builtin(builtin_numless));
-	env_set(env, make_sym(">"), make_builtin(builtin_numgr));
-	env_set(env, make_sym(">="), make_builtin(builtin_numgroreq));
-	env_set(env, make_sym("<="), make_builtin(builtin_numlessoreq));
-	env_set(env, make_sym("EQ?"), make_builtin(builtin_eq));
-	env_set(env, make_sym("APPLY"), make_builtin(builtin_apply));
-	env_set(env, make_sym("PAIR?"), make_builtin(builtin_pair));
-
-	load_file(env, "library.lisp");
-
-	while (fgets(input, 256, stdin) != NULL)
+	while(moduleData.running)
 	{
-		const char* p = input;
-		Error err;
-		Obj expr, result;
-
-		err = read_expr(p, &p, &expr);
-
-		if (!err)
-			err = eval_expr(expr, env, &result);
-
-		switch (err)
-		{
-			case Error_OK:
-				print_expr(result);
-				putchar('\n');
-				break;
-			case Error_Syntax:
-				puts("Syntax error");
-				break;
-			case Error_Unbound:
-				puts("Symbol not bound");
-				break;
-			case Error_Args:
-				puts("Wrong number of arguments");
-				break;
-			case Error_Type:
-				puts("Wrong type");
-				break;
-		}
+		printf("> ");
+		write(eval(read(stdin)));
+		printf("\n");
 	}
 
 	return 0;

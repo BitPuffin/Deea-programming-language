@@ -43,6 +43,9 @@
 # cmake output folder
 build/
 
+# vim ctags
+tags
+
 # cmake build files
 *.txt.*
 *.txt.*
