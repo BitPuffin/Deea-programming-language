@@ -1,74 +1,6 @@
 #include "deea.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdbool.h>
-#include <ctype.h>
-#include <math.h>
-
-#include <inttypes.h>
-#include <string.h>
-
-#define DEEA_VER "0.0.1"
-
-struct
-{
-	bool running;
-} moduleData;
-
-typedef enum
-{
-	FIXNUM,
-	BOOLEAN,
-	CHARACTER,
-	STRING,
-	EMPTY_LIST,
-	PAIR
-
-} object_type;
-
-typedef struct object {
-
-	object_type type;
-
-	union
-	{
-
-		struct
-		{
-			bool value;
-		} boolean;
-
-		struct
-		{
-			char* value;
-		} string;
-
-		struct
-		{
-			char value;
-		} character;
-
-		struct
-		{
-			long value;
-		} fixnum;
-
-		struct
-		{
-			struct object *car;
-			struct object *cdr;
-		} pair;
-
-	} data;
-
-} object;
-
-object* o_is_false;
-object* o_is_true;
-object* o_empty_list;
-
-static object *allocate_object(void)
+object *allocate_object(void)
 {
 	object* obj;
 
@@ -80,7 +12,7 @@ static object *allocate_object(void)
 	return obj;
 }
 
-static object* make_fixnum(long value)
+object* make_fixnum(long value)
 {
 	object* o;
 
@@ -91,32 +23,37 @@ static object* make_fixnum(long value)
 	return o;
 }
 
-static bool is_boolean(object* obj)
+bool is_boolean(object* obj)
 {
 	return (obj->type == BOOLEAN);
 }
 
-static bool is_false(object* obj)
+bool is_false(object* obj)
 {
 	return obj == o_is_false;
 }
 
-static bool is_true(object* obj)
+bool is_true(object* obj)
 {
 	return obj == o_is_true;
 }
 
-static bool is_empty_list(object* obj)
+bool is_symbol(object* obj)
+{
+	return obj->type == SYMBOL;
+}
+
+bool is_empty_list(object* obj)
 {
 	return obj == o_empty_list;
 }
 
-static bool is_fixnum(object* obj)
+bool is_fixnum(object* obj)
 {
 	return (obj->type == FIXNUM);
 }
 
-static object* make_character(char value)
+object* make_character(char value)
 {
 	object* obj;
 
@@ -127,7 +64,7 @@ static object* make_character(char value)
 	return obj;
 }
 
-static object* make_string(char* value)
+object* make_string(char* value)
 {
 	object* obj;
 
@@ -143,7 +80,36 @@ static object* make_string(char* value)
 	return obj;
 }
 
-static object* cons(object* car, object* cdr)
+object* make_symbol(char* value)
+{
+	object* obj;
+	object* element;
+
+	element = o_symbol_table;
+	while (!is_empty_list(element))
+	{
+		if (strcmp(car(element)->data.symbol.value, value) == 0)
+			return car(element);
+
+		element = cdr(element);
+	}
+
+	obj = allocate_object();
+	obj->type = SYMBOL;
+	obj->data.symbol.value = malloc(strlen(value) + 1);
+	if (obj->data.symbol.value == NULL)
+	{
+		fprintf(stderr, "out of memory for allocating symbol\n");
+		moduleData.running = false;
+	}
+
+	strcpy(obj->data.symbol.value, value);
+	o_symbol_table = cons(obj, o_symbol_table);
+
+	return obj;
+}
+
+object* cons(object* car, object* cdr)
 {
 	object* obj;
 
@@ -155,7 +121,7 @@ static object* cons(object* car, object* cdr)
 	return obj;
 }
 
-static object* car(object* pair)
+object* car(object* pair)
 {
 	return pair->data.pair.car;
 }
@@ -165,7 +131,7 @@ void set_car(object* obj, object* value)
 	obj->data.pair.car = value;
 }
 
-static object* cdr(object* pair)
+object* cdr(object* pair)
 {
 	return pair->data.pair.cdr;
 }
@@ -175,12 +141,12 @@ void set_cdr(object* obj, object* value)
 	obj->data.pair.cdr = value;
 }
 
-static bool is_string(object* obj)
+bool is_string(object* obj)
 {
 	return obj->type == STRING;
 }
 
-static void init(void)
+void init(void)
 {
 	o_is_false = allocate_object();
 	o_is_false->type = BOOLEAN;
@@ -193,15 +159,24 @@ static void init(void)
 	o_empty_list = allocate_object();
 	o_empty_list->type = EMPTY_LIST;
 
+	o_symbol_table = o_empty_list;
+
 }
 
-static bool is_delimiter(int c)
+bool is_initial(int c)
+{
+	return (
+			isalpha(c) || c == '*' || c == '/' || c == '>'
+			|| c == '<' || c == '?' || c == '!');
+}
+
+bool is_delimiter(int c)
 {
 	return isspace(c) || c == EOF || c == '(' || c == ')' ||
 		c == ';' || c == '"';
 }
 
-static int peek(FILE* in)
+int peek(FILE* in)
 {
 	int c;
 
@@ -211,7 +186,7 @@ static int peek(FILE* in)
 	return c;
 }
 
-static void eat_string(FILE* in, char* str)
+void eat_string(FILE* in, char* str)
 {
 	int c;
 
@@ -227,7 +202,7 @@ static void eat_string(FILE* in, char* str)
 	}
 }
 
-static void eat_whitespace(FILE* in)
+void eat_whitespace(FILE* in)
 {
 	int c;
 
@@ -246,7 +221,7 @@ static void eat_whitespace(FILE* in)
 	}
 }
 
-static void peek_expected_delimiter(FILE* in)
+void peek_expected_delimiter(FILE* in)
 {
 	if (!is_delimiter(peek(in)))
 	{
@@ -255,7 +230,7 @@ static void peek_expected_delimiter(FILE* in)
 	}
 }
 
-static object* read_character(FILE* in)
+object* read_character(FILE* in)
 {
 	int c;
 
@@ -289,8 +264,6 @@ static object* read_character(FILE* in)
 	peek_expected_delimiter(in);
 	return make_character(c);
 }
-
-static object* read(FILE* in);
 
 object* read_pair(FILE* in)
 {
@@ -413,6 +386,37 @@ object* read(FILE* in)
 		buffer[i] = '\0';
 		return make_string(buffer);
 	}
+	/* read a symbol */
+	else if ( (is_initial(c) || c == '+' || c == '-')
+			//&& is_delimiter(peek(in))
+			)
+	{
+		i = 0;
+		while (is_initial(c) || isdigit(c) || c == '+' || c == '-')
+		{
+			if (i < BUFFER_MAX - 1)
+				buffer[i++] = c;
+			else
+			{
+				fprintf(stderr, "symbol too long. Maximum length is %d \n", BUFFER_MAX);
+				moduleData.running = false;
+			}
+			c = getc(in);
+		}
+
+		if (is_delimiter(c))
+		{
+			buffer[i] = '\0';
+			ungetc(c, in);
+			return make_symbol(buffer);
+		}
+		else
+		{
+			fprintf(stderr, "symbol not followed by a delimitator. Found '%c'\n", c);
+			moduleData.running = false;
+		}
+
+	}
 	else if (c == '(')
 	{
 		return read_pair(in);
@@ -453,14 +457,12 @@ object* read(FILE* in)
 	moduleData.running = false;
 }
 
-static object* eval (object* exp)
+object* eval (object* exp)
 {
 	return exp;
 }
 
-static void write(object* obj);
-
-static void write_pair(object* obj)
+void write_pair(object* obj)
 {
 	object* car_obj;
 	object* cdr_obj;
@@ -526,6 +528,11 @@ void write(object* obj)
 				default:
 					putchar(c);
 			}
+			break;
+
+		case SYMBOL:
+			str = obj->data.string.value;
+			printf("%s", str);
 			break;
 
 		case STRING:
