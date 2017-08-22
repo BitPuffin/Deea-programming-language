@@ -4,6 +4,7 @@
 *.obj
 *.elf
 *.py[cod]
+deea
 
 #Editors
 *~

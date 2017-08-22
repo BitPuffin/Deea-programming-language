@@ -1,8 +1,12 @@
-CFLAGS=-std=gnu99 -g -O2 -lm -Wall
+CFLAGS=-std=gnu99 -g -lm -Wall -I.
+CC=gcc
+
+OBJ=main.o 
 
 .PHONY: clean 
 
-deea: deea.c eval.c writer.c reader.c helper.c
+deea: $(OBJ) 
+		$(CC) $(OBJ) -o deea $(CFLAGS)
 
 clean:
 	rm -f deea *~
