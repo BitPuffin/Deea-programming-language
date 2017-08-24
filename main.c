@@ -29,7 +29,7 @@ struct Atom
 		AtomType_Nil,
 		AtomType_Integer,
 		AtomType_Pair,
-		AtomType_Symbol
+		AtomType_Symbol,
 	} type;
 
 	const char* symbol;
@@ -41,7 +41,11 @@ struct Atom
 typedef enum
 {
 	Error_OK = 0,
-	Error_Syntax = 1
+	Error_Syntax = 1,
+	Error_Unbound = 3,
+	Error_Args = 4,/* A list exp was shorter or longer than expected */
+	Error_Type = 5 /* An object in an exp was of different type than expected */
+
 } Error;
 
 struct Pair
@@ -279,6 +283,147 @@ static int read_expr(const char* input, const char** end, Atom* result)
 		return parse_simple(token, *end, result);
 }
 
+/*
+ * HOW AN ENVIRONMENT WORKS ?
+ *
+ * To associate identifiers with objects we
+ * need an environment. This binds each
+ * identifier with its corresponding value.
+ * eg:
+ * Identifier | Value
+ * FOO        |  97
+ * BAR        |  NIL
+ * BOR        | (X Y Z)
+ *
+ * (parent ( identifier . value ) ... )
+ */
+
+/*
+ * Create an empty environment with a specific parent (can be NIL)
+ */
+static Atom env_create(Atom parent)
+{
+	return cons(parent, nil);
+}
+
+static int env_get(Atom env, Atom symbol, Atom* result)
+{
+
+	Atom parent =  car(env);
+	Atom next = cdr(env);
+
+	while (!nilc(next))
+	{
+		Atom b = car(next);
+		if (car(b).symbol == symbol.symbol)
+		{
+			*result = cdr(b);
+			return Error_OK;
+		}
+		next = cdr(next);
+	}
+
+	/*
+	 * eg: foo , here the indentifier,foo, needs a value!
+	 */
+	if (nilc(parent))
+		return Error_Unbound;
+
+	return env_get(parent, symbol, result);
+}
+
+static int env_set(Atom env, Atom symbol, Atom value)
+{
+
+	Atom next = cdr(env);
+	Atom b = nil;
+
+	/*
+	 * First look if we already have
+	 * this symbol stored so we can
+	 * change it's value
+	 */
+	while (!nilc(next))
+	{
+
+		b = car(next);
+
+		if (b.symbol == symbol.symbol)
+		{
+			car(b) = value;
+			return Error_OK;
+		}
+
+		next = cdr(next);
+	}
+
+	b = cons(symbol, value);
+	cdr(env) = cons(b, cdr(env));
+
+	return Error_OK;
+}
+
+static int listc(Atom expr)
+{
+	while(nilc(expr))
+	{
+
+		if (expr.type != AtomType_Pair)
+			return 0;
+
+		expr = cdr(expr);
+	}
+
+	return 1;
+}
+
+static int eval_expr(Atom expr, Atom env, Atom* result)
+{
+
+	Atom op, args;
+	Error err;
+
+	if (expr.type == AtomType_Symbol)
+	{
+		return env_get(env, expr, result);
+	}
+	else if (expr.type != AtomType_Pair)
+	{
+		*result = expr;
+		return Error_OK;
+	}
+
+	if (!listc(expr))
+		return Error_Syntax;
+
+	op = car(expr);
+	args = cdr(expr);
+
+	if (op.type == AtomType_Symbol)
+	{
+		if ( strcmp(op.symbol, "QUOTE") == 0 )
+		{
+			/*
+			 * eg:
+			 * 1) quote - no arguments so fail
+			 * 2) quote foo (bar pep)) - too many arguments
+			 */
+			if (nilc(args) || !nilc(cdr(args)))
+				return Error_Args;
+
+			*result = car(args);
+			return Error_OK;
+
+		}
+		else if ( strcmp(op.symbol, "DEFINE") == 0 )
+		{
+			//if (nilc(args) || nilc) TODO
+		}
+	}
+
+	return Error_Syntax;
+}
+
 static void print_expr(Atom atom)
 {
 	switch (atom.type)
@@ -347,24 +492,40 @@ int main(int argc, char* argv[])
 	print_expr(a);
 	*/
 
+	Atom env;
+
+	env = env_create(nil);
+
 	char buffer[1024];
 	while (fgets(buffer, 1024, stdin) != NULL)
 	{
 		Error err;
-		Atom a;
+		Atom expr, result;
 
 		const char* p = buffer;
 
-		err = read_expr(p, &p, &a);
+		err = read_expr(p, &p, &expr);
+
+		if (!err)
+			err = eval_expr(expr, env, &result);
 
 		switch(err)
 		{
 			case Error_OK:
-				print_expr(a);
+				print_expr(result);
 				putchar('\n');
 				break;
 			case Error_Syntax:
 				puts("Syntax error!");
+				break;
+			case Error_Unbound:
+				puts("Symbol not bound!");
+				break;
+			case Error_Args:
+				puts("Wrong number of arguments!");
+				break;
+			case Error_Type:
+				puts("Wrong type!");
 				break;
 		}
 
