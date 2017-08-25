@@ -365,7 +365,7 @@ static int env_set(Atom env, Atom symbol, Atom value)
 
 static int listc(Atom expr)
 {
-	while(nilc(expr))
+	while(!nilc(expr))
 	{
 
 		if (expr.type != AtomType_Pair)
@@ -383,6 +383,13 @@ static int eval_expr(Atom expr, Atom env, Atom* result)
 	Atom op, args;
 	Error err;
 
+	/*
+	 * Eg:
+	 * After we have defined a variable like this:
+	 * (define foo 1)
+	 * when we call foo to get its value
+	 * we execute this part of code
+	 */
 	if (expr.type == AtomType_Symbol)
 	{
 		return env_get(env, expr, result);
@@ -415,9 +422,31 @@ static int eval_expr(Atom expr, Atom env, Atom* result)
 			return Error_OK;
 
 		}
-		else if ( strcmp(op.symbol, "DEFINE") == 0 )
+		else if ( strcmp(op.symbol, "SET") == 0 )
 		{
-			//if (nilc(args) || nilc) TODO
+			/*
+			 * Eg: (define foo 42 124)
+			 * foo is nilc(args)
+			 * 42 is cdr(args)
+			 * cdr(cdr(args)) 124
+			 */
+			if (nilc(args) || nilc(cdr(args)) || !nilc(cdr(cdr(args))) )
+			   return Error_Args;
+
+			Atom sym, val;
+
+			sym = car(args);
+
+			if (sym.type != AtomType_Symbol)
+				return Error_Type;
+
+			err = eval_expr(car(cdr(args)), env, &val);
+			if (err)
+				return err;
+
+			*result = sym;
+			return env_set(env, sym, val);
+
 		}
 	}
 
