@@ -22,6 +22,11 @@ static char* _strdup(const char* value)
 	return buffer;
 }
 
+
+typedef struct Atom Atom;
+
+typedef int (*Builtin) (struct Atom args, struct Atom *result);
+
 struct Atom
 {
 	enum
@@ -30,10 +35,12 @@ struct Atom
 		AtomType_Integer,
 		AtomType_Pair,
 		AtomType_Symbol,
+		AtomType_Builtin,
 	} type;
 
 	const char* symbol;
 	long integer;
+	Builtin builtin;
 	struct Pair* pair;
 
 };
@@ -52,8 +59,6 @@ struct Pair
 {
 	struct Atom atom[2];
 };
-
-typedef struct Atom Atom;
 
 static const Atom nil = { AtomType_Nil };
 static Atom sym_table = { AtomType_Nil };
@@ -110,7 +115,6 @@ static Atom make_symbol(const char* value)
 	a.symbol = _strdup(value);
 
 	sym_table = cons(a, sym_table);
-
 
 	return a;
 }
@@ -332,6 +336,12 @@ static int env_get(Atom env, Atom symbol, Atom* result)
 	return env_get(parent, symbol, result);
 }
 
+/*
+ * Look if we have @symbol inside @env and if we do
+ * return it.
+ * If @symbol is not found in @env we add the new @symbol + its @value
+ * to the tail of @env
+ */
 static int env_set(Atom env, Atom symbol, Atom value)
 {
 
@@ -341,7 +351,7 @@ static int env_set(Atom env, Atom symbol, Atom value)
 	/*
 	 * First look if we already have
 	 * this symbol stored so we can
-	 * change it's value
+	 * change its value
 	 */
 	while (!nilc(next))
 	{
@@ -375,6 +385,40 @@ static int listc(Atom expr)
 	}
 
 	return 1;
+}
+
+static Atom copy_list(Atom list)
+{
+	Atom a, p;
+
+	if (nilc(list))
+		return nil;
+
+	a = cons(car(list), nil);
+	p = a;
+	list = cdr(list);
+
+	while (!nilc(list))
+	{
+		cdr(p) = cons(car(list), list);
+		p = cdr(p);
+
+		list = cdr(list);
+	}
+
+	return a;
+}
+
+/*
+ * Right now it only calls the builtin func with a list of arguments
+ */
+static int apply(Atom fn, Atom args, Atom* result)
+{
+
+	if (fn.type == AtomType_Builtin)
+		return (*fn.builtin)(args, result);
+
+	return Error_Type;
 }
 
 static int eval_expr(Atom expr, Atom env, Atom* result)
@@ -424,12 +468,6 @@ static int eval_expr(Atom expr, Atom env, Atom* result)
 		}
 		else if ( strcmp(op.symbol, "SET") == 0 )
 		{
-			/*
-			 * Eg: (define foo 42 124)
-			 * foo is nilc(args)
-			 * 42 is cdr(args)
-			 * cdr(cdr(args)) 124
-			 */
 			if (nilc(args) || nilc(cdr(args)) || !nilc(cdr(cdr(args))) )
 			   return Error_Args;
 
@@ -448,9 +486,173 @@ static int eval_expr(Atom expr, Atom env, Atom* result)
 			return env_set(env, sym, val);
 
 		}
+	} // SYMBOL
+
+	Atom p;
+
+	/*
+	 * At this point we assume what's below is a function
+	 */
+
+	/*
+	 * Evaluate operator
+	 */
+
+	err = eval_expr(op, env, &op);
+	if (err)
+		return err;
+
+	/*
+	 * Evaluate arguments
+	 */
+	args = copy_list(args);
+	p = args;
+	while(!nilc(p))
+	{
+		err = eval_expr(car(p), env, &car(p));
+		if (err)
+			return err;
+
+		p = cdr(p);
 	}
 
-	return Error_Syntax;
+	return apply(op, args, result);
+}
+
+/*
+ * Functions
+ */
+
+static Atom make_builtin(Builtin fn)
+{
+	Atom a;
+
+	a.type = AtomType_Builtin;
+	a.builtin = fn;
+
+	return a;
+}
+
+static int builtin_car(Atom args, Atom* result)
+{
+	if (nilc(args) || !nilc(cdr(args)))
+		return Error_Args;
+
+	if (nilc(car(args)))
+		*result = nil;
+	else if (car(args).type != AtomType_Pair)
+		return Error_Type;
+	else
+		*result = car(car(args));
+
+	return Error_OK;
+}
+
+static int builtin_cdr(Atom args, Atom* result)
+{
+
+	if (nilc(args) || !nilc(cdr(args)))
+		return Error_Args;
+
+	//(set foo 42)
+	//(cdr foo)
+
+	if (nilc(car(args)))
+		*result = nil;
+	else if (car(args).type != AtomType_Pair)
+		return Error_Type;
+	else
+		*result = cdr(car(args));
+
+	return Error_OK;
+}
+
+static int builtin_cons(Atom args, Atom* result)
+{
+	/*
+	 * (set foo 1)
+	 * (set bar 2)
+	 * (cons foo bar)
+	 * -> (1 2)
+	 */
+
+	if (nilc(args) || nilc(cdr(args)) || nilc(cdr(cdr(args))) )
+		return Error_Args;
+
+	*result = cons(car(args), car(cdr(args)));
+
+	return Error_OK;
+}
+
+static int builtin_add(Atom args, Atom* result)
+{
+
+	//(+ 1 2)
+
+	Atom a, b;
+	if (nilc(args) || nilc(cdr(args)))
+		return Error_Args;
+
+	a = car(args);
+	b = car(cdr(args));
+
+	if (a.type != AtomType_Integer || b.type != AtomType_Integer)
+		return Error_Type;
+
+	*result = make_int(a.integer + b.integer);
+
+	return Error_OK;
+}
+
+static int builtin_sub(Atom args, Atom* result)
+{
+	Atom a, b;
+	if (nilc(args) || nilc(cdr(args)))
+		return Error_Args;
+
+	a = car(args);
+	b = car(cdr(args));
+
+	if (a.type != AtomType_Integer || b.type != AtomType_Integer)
+		return Error_Type;
+
+	*result = make_int(a.integer - b.integer);
+
+	return Error_OK;
+}
+
+static int builtin_div(Atom args, Atom* result)
+{
+	Atom a, b;
+	if (nilc(args) || nilc(cdr(args)))
+		return Error_Args;
+
+	a = car(args);
+	b = car(cdr(args));
+
+	if (a.type != AtomType_Integer || b.type != AtomType_Integer)
+		return Error_Type;
+
+	*result = make_int(a.integer / b.integer);
+
+	return Error_OK;
+}
+
+static int builtin_mul(Atom args, Atom* result)
+{
+	Atom a, b;
+	if (nilc(args) || nilc(cdr(args)))
+		return Error_Args;
+
+	a = car(args);
+	b = car(cdr(args));
+
+	if (a.type != AtomType_Integer || b.type != AtomType_Integer)
+		return Error_Type;
+
+	*result = make_int(a.integer * b.integer);
+
+	return Error_OK;
 }
 
 static void print_expr(Atom atom)
@@ -467,6 +669,10 @@ static void print_expr(Atom atom)
 
 		case AtomType_Symbol:
 			printf("%s", atom.symbol);
+			break;
+
+		case AtomType_Builtin:
+			printf("#<BUILTIN:%p>", atom.builtin);
 			break;
 
 		case AtomType_Pair:
@@ -524,6 +730,21 @@ int main(int argc, char* argv[])
 	Atom env;
 
 	env = env_create(nil);
+
+	/* Set up init env */
+
+	env_set(env, make_symbol("FIRST"),         make_builtin(builtin_car));
+	env_set(env, make_symbol("CAR"),           make_builtin(builtin_car));
+
+	env_set(env, make_symbol("CDR"),           make_builtin(builtin_cdr));
+	env_set(env, make_symbol("REST"),          make_builtin(builtin_cdr));
+
+	env_set(env, make_symbol("CONS"),          make_builtin(builtin_cons));
+
+	env_set(env, make_symbol("+"),             make_builtin(builtin_add));
+	env_set(env, make_symbol("-"),             make_builtin(builtin_sub));
+	env_set(env, make_symbol("*"),             make_builtin(builtin_mul));
+	env_set(env, make_symbol("/"),             make_builtin(builtin_div));
 
 	char buffer[1024];
 	while (fgets(buffer, 1024, stdin) != NULL)
