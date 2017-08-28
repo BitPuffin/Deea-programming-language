@@ -36,6 +36,7 @@ struct Atom
 		AtomType_Pair,
 		AtomType_Symbol,
 		AtomType_Builtin,
+		AtomType_Closure,
 	} type;
 
 	const char* symbol;
@@ -119,6 +120,47 @@ static Atom make_symbol(const char* value)
 	return a;
 }
 
+static int listc(Atom expr)
+{
+	while(!nilc(expr))
+	{
+
+		if (expr.type != AtomType_Pair)
+			return 0;
+
+		expr = cdr(expr);
+	}
+
+	return 1;
+}
+
+static int make_closure(Atom env, Atom args, Atom body, Atom* result)
+{
+	/*
+	 * (define symbol (lambda (args) (body)))
+	 */
+
+	Atom p;
+
+	if (!listc(args) || !listc(body))
+		return Error_Syntax;
+
+	/* args must be symbols */
+	p = args;
+	while(!nilc(p))
+	{
+		if (car(p).type != AtomType_Symbol)
+			return Error_Type;
+
+		p = cdr(p);
+	}
+
+	*result = cons(env, cons(args, body));
+	result->type = AtomType_Closure;
+
+	return Error_OK;
+}
+
 /* Read a single object and return error status and a pointer to the reminder of the input. */
 static int read_expr(const char* input, const char** end, Atom* result);
 
@@ -130,7 +172,7 @@ static int lexer(const char* str, const char** start, const char** end)
 {
 	const char* ws = " \t\n";
 	const char* delim = " ()\t\n";
-	const char* prefix = "()";
+	const char* prefix = "()\'";
 
 	str += strspn(str, ws);
 	/*
@@ -283,6 +325,12 @@ static int read_expr(const char* input, const char** end, Atom* result)
 		return read_list(*end, end, result);
 	else if (token[0] == ')')
 		return Error_Syntax;
+	else if (token[0] == '\'')
+	{
+		*result = cons(make_symbol("QUOTE"), cons(nil, nil));
+
+		return read_expr(*end, end, &car(cdr(*result)));
+	}
 	else
 		return parse_simple(token, *end, result);
 }
@@ -314,17 +362,17 @@ static int env_get(Atom env, Atom symbol, Atom* result)
 {
 
 	Atom parent =  car(env);
-	Atom next = cdr(env);
+	Atom bs = cdr(env);
 
-	while (!nilc(next))
+	while (!nilc(bs))
 	{
-		Atom b = car(next);
+		Atom b = car(bs);
 		if (car(b).symbol == symbol.symbol)
 		{
 			*result = cdr(b);
 			return Error_OK;
 		}
-		next = cdr(next);
+		bs = cdr(bs);
 	}
 
 	/*
@@ -358,9 +406,9 @@ static int env_set(Atom env, Atom symbol, Atom value)
 
 		b = car(next);
 
-		if (b.symbol == symbol.symbol)
+		if (car(b).symbol == symbol.symbol)
 		{
-			car(b) = value;
+			cdr(b) = value;
 			return Error_OK;
 		}
 
@@ -371,20 +419,6 @@ static int env_set(Atom env, Atom symbol, Atom value)
 	cdr(env) = cons(b, cdr(env));
 
 	return Error_OK;
-}
-
-static int listc(Atom expr)
-{
-	while(!nilc(expr))
-	{
-
-		if (expr.type != AtomType_Pair)
-			return 0;
-
-		expr = cdr(expr);
-	}
-
-	return 1;
 }
 
 static Atom copy_list(Atom list)
@@ -400,7 +434,7 @@ static Atom copy_list(Atom list)
 
 	while (!nilc(list))
 	{
-		cdr(p) = cons(car(list), list);
+		cdr(p) = cons(car(list), nil);
 		p = cdr(p);
 
 		list = cdr(list);
@@ -408,6 +442,8 @@ static Atom copy_list(Atom list)
 
 	return a;
 }
+
+static int eval_expr(Atom expr, Atom env, Atom* result);
 
 /*
  * Right now it only calls the builtin func with a list of arguments
@@ -417,8 +453,40 @@ static int apply(Atom fn, Atom args, Atom* result)
 
 	if (fn.type == AtomType_Builtin)
 		return (*fn.builtin)(args, result);
+	else if (fn.type != AtomType_Closure)
+		return Error_Type;
 
-	return Error_Type;
+	Atom env, arg_names, body;
+
+	env = env_create(car(fn));
+	arg_names = car(cdr(fn));
+	body = cdr(cdr(fn));
+
+	//printf("%s %s %s \n", env.symbol, arg_names.symbol, body.symbol);
+
+	while (!nilc(arg_names))
+	{
+		if (nilc(args))
+			return Error_Args;
+
+		env_set(env, car(arg_names), car(args));
+		arg_names = cdr(arg_names);
+		args = cdr(args);
+	}
+
+	if (!nilc(args))
+		return Error_Args;
+
+	while (!nilc(body))
+	{
+		Error err = eval_expr(car(body), env, result);
+		if (err)
+			return err;
+
+		body = cdr(body);
+	}
+
+	return Error_OK;
 }
 
 static int eval_expr(Atom expr, Atom env, Atom* result)
@@ -466,7 +534,7 @@ static int eval_expr(Atom expr, Atom env, Atom* result)
 			return Error_OK;
 
 		}
-		else if ( strcmp(op.symbol, "SET") == 0 )
+		else if ( strcmp(op.symbol, "DEFINE") == 0 )
 		{
 			if (nilc(args) || nilc(cdr(args)) || !nilc(cdr(cdr(args))) )
 			   return Error_Args;
@@ -486,6 +554,35 @@ static int eval_expr(Atom expr, Atom env, Atom* result)
 			return env_set(env, sym, val);
 
 		}
+		else if ( strcmp(op.symbol, "LAMBDA") == 0 )
+		{
+			if (nilc(args) || nilc(cdr(args)))
+				return Error_Args;
+
+			return make_closure(env, car(args), cdr(args), result);
+
+		}
+		else if (strcmp(op.symbol, "IF") == 0)
+		{
+
+			/*
+			 * (if test true_exp false_exp)
+			 */
+
+			if (nilc(args) || nilc(cdr(args)) || nilc(cdr(cdr(args))) || !nilc(cdr(cdr(cdr(args)))))
+				return Error_Args;
+
+			Atom cond, val;
+
+			err = eval_expr(car(args), env, &cond);
+			if (err)
+				return err;
+
+			val = nilc(cond) ? car(cdr(cdr(args))) : car(cdr(args));
+
+			return eval_expr(val, env, result);
+		}
+
 	} // SYMBOL
 
 	Atom p;
@@ -655,6 +752,148 @@ static int builtin_mul(Atom args, Atom* result)
 	return Error_OK;
 }
 
+static int bultin_eq(Atom args, Atom* result)
+{
+
+	/*
+	 * (= 1 1)
+	 */
+
+	if (nilc(args) || nilc(cdr(args)) || !nilc(cdr(cdr(args))))
+		return Error_Args;
+
+	Atom a, b;
+	a = car(args);
+	b = car(cdr(args));
+
+	if (a.type != AtomType_Integer || b.type != AtomType_Integer)
+		return Error_Args;
+
+	*result = (a.integer == b.integer) ? make_symbol("T") : nil;
+
+	return Error_OK;
+}
+
+static int builtin_less(Atom args, Atom* result)
+{
+
+	/*
+	 * (< 2 3)
+	 */
+
+	if (nilc(args) || nilc(cdr(args)) || !nilc(cdr(cdr(args))))
+		return Error_Args;
+
+	Atom a, b;
+
+	a = car(args);
+	b = car(cdr(args));
+
+	if (a.type != AtomType_Integer || b.type != AtomType_Integer)
+		return Error_Args;
+
+	*result = (a.integer < b.integer) ? make_symbol("T") : nil;
+
+	return Error_OK;
+}
+
+static int builtin_more(Atom args, Atom* result)
+{
+
+	/*
+	 * (> 3 6)
+	 */
+
+	if (nilc(args) || nilc(cdr(args)) || !nilc(cdr(cdr(args))))
+		return Error_Args;
+
+	Atom a, b;
+
+	a = car(args);
+	b = car(cdr(args));
+
+
+	if (a.type != AtomType_Integer || b.type != AtomType_Integer)
+		return Error_Args;
+
+	*result = (a.integer > b.integer) ? make_symbol("T") : nil;
+
+	return Error_OK;
+}
+
+static int builtin_more_eq(Atom args, Atom* result)
+{
+
+	/*
+	 * (>= 3 6)
+	 */
+
+	if (nilc(args) || nilc(cdr(args)) || !nilc(cdr(cdr(args))))
+		return Error_Args;
+
+	Atom a, b;
+
+	a = car(args);
+	b = car(cdr(args));
+
+	if (a.type != AtomType_Integer || b.type != AtomType_Integer)
+		return Error_Args;
+
+	*result = (a.integer >= b.integer) ? make_symbol("T") : nil;
+
+	return Error_OK;
+}
+
+static int builtin_less_eq(Atom args, Atom* result)
+{
+
+	/*
+	 * (<= 3 6)
+	 */
+
+	if (nilc(args) || nilc(cdr(args)) || !nilc(cdr(cdr(args))))
+		return Error_Args;
+
+	Atom a, b;
+
+	a = car(args);
+	b = car(cdr(args));
+
+	if (a.type != AtomType_Integer || b.type != AtomType_Integer)
+		return Error_Args;
+
+	*result = (a.integer <= b.integer) ? make_symbol("T") : nil;
+
+	return Error_OK;
+}
+
+static int builtin_eq_obj(Atom args, Atom* result)
+{
+
+	/*
+	 * (eq? x x) -> T
+	 * (eq? x y) -> nil
+	 */
+
+	if (nilc(args) || nilc(cdr(args)) || !nilc(cdr(cdr(args))))
+		return Error_Args;
+
+	Atom a, b;
+
+	a = car(args);
+	b = car(cdr(args));
+
+	if (a.type != AtomType_Symbol || b.type != AtomType_Symbol)
+		return Error_Args;
+
+
+	*result = (strcmp(a.symbol, b.symbol) == 0) ? make_symbol("T") : nil;
+
+	return Error_OK;
+}
+
+
+
 static void print_expr(Atom atom)
 {
 	switch (atom.type)
@@ -745,6 +984,15 @@ int main(int argc, char* argv[])
 	env_set(env, make_symbol("-"),             make_builtin(builtin_sub));
 	env_set(env, make_symbol("*"),             make_builtin(builtin_mul));
 	env_set(env, make_symbol("/"),             make_builtin(builtin_div));
+
+	env_set(env, make_symbol("T"),             make_symbol("T"));
+
+	env_set(env, make_symbol("="),             make_builtin(bultin_eq));
+	env_set(env, make_symbol("<"),             make_builtin(builtin_less));
+	env_set(env, make_symbol(">"),             make_builtin(builtin_more));
+	env_set(env, make_symbol(">="),            make_builtin(builtin_more_eq));
+	env_set(env, make_symbol("<="),            make_builtin(builtin_less_eq));
+	env_set(env, make_symbol("eq?"),            make_builtin(builtin_eq_obj));
 
 	char buffer[1024];
 	while (fgets(buffer, 1024, stdin) != NULL)
