@@ -12,6 +12,31 @@
 #define cdr(p) ((p).pair->atom[1])
 #define nilc(p) ((p).type == AtomType_Nil)
 
+char* slurp(const char* path)
+{
+	FILE* file;
+	char* buf;
+
+	file = fopen(path, "r");
+
+	if (!file)
+		return NULL;
+
+	fseek(file, 0, SEEK_END);
+	long length = ftell(file);
+	fseek(file, 0, SEEK_SET);
+
+	buf = malloc(length);
+	if (!buf)
+		return NULL;
+
+	fread(buf, 1, length, file);
+	fclose(file);
+
+	return buf;
+
+}
+
 static char* _strdup(const char* value)
 {
 	size_t len = strlen(value);
@@ -543,14 +568,29 @@ static int eval_expr(Atom expr, Atom env, Atom* result)
 
 			sym = car(args);
 
-			if (sym.type != AtomType_Symbol)
+			/* expecting lambda */
+			if (sym.type == AtomType_Pair)
+			{
+				err = make_closure(env, cdr(sym), cdr(args), &val);
+				sym = car(sym);
+				if (sym.type != AtomType_Symbol)
+					return Error_Type;
+			}
+			else if (sym.type == AtomType_Symbol)
+			{
+				if (!nilc(cdr(cdr(args))))
+					return Error_Args;
+
+				err = eval_expr(car(cdr(args)), env, &val);
+			}
+			else
 				return Error_Type;
 
-			err = eval_expr(car(cdr(args)), env, &val);
 			if (err)
 				return err;
 
 			*result = sym;
+
 			return env_set(env, sym, val);
 
 		}
@@ -703,11 +743,33 @@ static int builtin_add(Atom args, Atom* result)
 
 static int builtin_sub(Atom args, Atom* result)
 {
-	Atom a, b;
-	if (nilc(args) || nilc(cdr(args)))
+	if (nilc(args))
 		return Error_Args;
 
+	/*
+	 * case 1) (- 6)
+	 * case 2) (- 6 3)
+	 */
+
+	Atom a;
+
 	a = car(args);
+
+	// case 1)
+	if (nilc(cdr(args)))
+	{
+
+		if (a.type != AtomType_Integer)
+			return Error_Type;
+
+		*result = make_int(-a.integer);
+
+		return Error_OK;
+	}
+	// case 2)
+
+	Atom b;
+
 	b = car(cdr(args));
 
 	if (a.type != AtomType_Integer || b.type != AtomType_Integer)
@@ -867,32 +929,57 @@ static int builtin_less_eq(Atom args, Atom* result)
 	return Error_OK;
 }
 
+//BROKEN !
 static int builtin_eq_obj(Atom args, Atom* result)
 {
 
 	/*
-	 * (eq? x x) -> T
-	 * (eq? x y) -> nil
+	 * https://stackoverflow.com/questions/16299246/what-is-the-difference-between-eq-eqv-equal-and-in-scheme
 	 */
 
 	if (nilc(args) || nilc(cdr(args)) || !nilc(cdr(cdr(args))))
 		return Error_Args;
 
+	int eq;
 	Atom a, b;
-
 	a = car(args);
 	b = car(cdr(args));
 
-	if (a.type != AtomType_Symbol || b.type != AtomType_Symbol)
-		return Error_Args;
+	if (a.type == b.type)
+	{
+		if (a.type == AtomType_Nil)
+			eq = 1;
+		//else if (a.type == AtomType_Integer)
+		//	eq = (a == b);
+		else if (a.type == AtomType_Symbol)
+			eq = a.symbol == b.symbol;
+		else if (a.type == AtomType_Builtin)
+			eq = (a.builtin == b.builtin);
+	}
+	else
+		eq = 0;
 
-
-	*result = (strcmp(a.symbol, b.symbol) == 0) ? make_symbol("T") : nil;
+	*result = (eq == 1) ? make_symbol("T") : nil;
 
 	return Error_OK;
 }
 
+static void print_expr(Atom atom);
 
+static int builtin_print(Atom args, Atom* result)
+{
+	/* (print atom) */
+
+	if (nilc(args) || !nilc(cdr(args)))
+		return Error_Args;
+
+	Atom a;
+	a = car(args);
+
+	print_expr(a);
+
+	return Error_OK;
+}
 
 static void print_expr(Atom atom)
 {
@@ -941,6 +1028,43 @@ static void print_expr(Atom atom)
 		default:
 			break;
 	}
+}
+
+void load_file(Atom env, const char* path)
+{
+	char* file;
+
+	printf("Reading file: %s\n", path);
+
+	file = slurp(path);
+	if (file)
+	{
+		const char* p = file;
+		Atom expr;
+
+		while (read_expr(p, &p, &expr) == Error_OK)
+		{
+			Atom result;
+			Error err = eval_expr(expr, env, &result);
+			if (err)
+			{
+				printf("Error in expression: \n");
+				print_expr(expr);
+				putchar('\n');
+			}
+			else
+			{
+				print_expr(result);
+				putchar('\n');
+			}
+
+		}
+
+	}
+	else
+		printf("Couldn't open up path: %s \n", path);
+
+	free(file);
 }
 
 int main(int argc, char* argv[])
@@ -992,7 +1116,11 @@ int main(int argc, char* argv[])
 	env_set(env, make_symbol(">"),             make_builtin(builtin_more));
 	env_set(env, make_symbol(">="),            make_builtin(builtin_more_eq));
 	env_set(env, make_symbol("<="),            make_builtin(builtin_less_eq));
-	env_set(env, make_symbol("eq?"),            make_builtin(builtin_eq_obj));
+	env_set(env, make_symbol("EQ?"),           make_builtin(builtin_eq_obj));
+
+	env_set(env, make_symbol("PRINT"),         make_builtin(builtin_print));
+
+	load_file(env, "libdeea.deea");
 
 	char buffer[1024];
 	while (fgets(buffer, 1024, stdin) != NULL)
