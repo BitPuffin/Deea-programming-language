@@ -726,10 +726,10 @@ static int builtin_add(Atom args, Atom* result)
 
 	//(+ 1 2)
 
-	Atom a, b;
-	if (nilc(args) || nilc(cdr(args)))
+	if (nilc(args) || nilc(cdr(args)) || !nilc(cdr(cdr(args))))
 		return Error_Args;
 
+	Atom a, b;
 	a = car(args);
 	b = car(cdr(args));
 
@@ -944,24 +944,32 @@ static int builtin_eq_obj(Atom args, Atom* result)
 	a = car(args);
 	b = car(cdr(args));
 
+	printf("%d %d \n", a.type, b.type);
+
+	// (eq? (cons 1 2) (cons 4 5))
 	// ((lambda (x) (eq? x x)) (cons 1 2))
 
 	if (a.type == b.type)
 	{
-		if (a.type == AtomType_Nil)
-			eq = 1;
-		/* In deea eq? is the same as '=' when it comes to integer verification */
-		else if (a.type == AtomType_Pair)
+		switch(a.type)
 		{
-			printf ("%s %s \n", a.symbol, b.symbol );
-			//eq = (car(a) == car(cdr(b)));
+			case AtomType_Nil:
+				eq = 1;
+				break;
+			case AtomType_Pair:
+			case AtomType_Closure:
+				eq = (a.pair == b.pair);
+				break;
+			case AtomType_Symbol:
+				eq = (a.symbol == b.symbol);
+				break;
+			case AtomType_Integer:
+				eq = (a.integer == b.integer);
+				break;
+			case AtomType_Builtin:
+				eq = (a.builtin == b.builtin );
+				break;
 		}
-		else if (a.type == AtomType_Integer)
-			eq = (a.integer  == b.integer);
-		else if (a.type == AtomType_Symbol)
-			eq = (a.symbol == b.symbol);
-		else if (a.type == AtomType_Builtin)
-			eq = (a.builtin == b.builtin);
 	}
 
 	*result = (eq == 1) ? make_symbol("T") : nil;
