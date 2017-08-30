@@ -997,10 +997,10 @@ static int builtin_pair(Atom args, Atom* result)
 
 	/* (pair? a b) */
 
-	if (nilc(args) || nilc(cdr(args)))
+	if (nilc(args) || nilc(cdr(args)) || !nilc(cdr(cdr(args))))
 			return Error_Args;
 
-
+	*result = (car(args).type == AtomType_Pair && car(cdr(args)).type == AtomType_Pair) ? make_symbol("T") : nil;
 
 	return Error_OK;
 }
