@@ -2,6 +2,7 @@
 (define (square x) (* x x))
 (define (min a b) (if (< a b) a b))
 (define (max a b) (if (> a b) a b))
+(define (even? n) (= 0 (modulo n 2)))
 
 (define (--reverse-append li tail)
   (if (eq? nil li)
