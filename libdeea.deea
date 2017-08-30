@@ -22,3 +22,10 @@
       (if (p (first l))
           (cons (first l) (filter p (rest l)))
           (filter p (rest l)))))
+
+(define (fold-left fn a b)
+  (if (eq? nil b)
+      a
+      (fold-left fn
+                 (fn (first b) a)
+                 (rest b))))
