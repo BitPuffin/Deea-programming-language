@@ -944,11 +944,9 @@ static int builtin_eq_obj(Atom args, Atom* result)
 	a = car(args);
 	b = car(cdr(args));
 
-	printf("%d %d \n", a.type, b.type);
-
-	// (eq? (cons 1 2) (cons 4 5))
-	// ((lambda (x) (eq? x x)) (cons 1 2))
-
+	/* (eq? (cons 1 2) (cons 4 5))
+	 * ((lambda (x) (eq? x x)) (cons 1 2))
+	 */
 	if (a.type == b.type)
 	{
 		switch(a.type)
