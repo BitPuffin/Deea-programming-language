@@ -15,3 +15,10 @@
   (if (eq? nil l)
       nil
     (cons (f (first l)) (map f (rest l)))))
+
+(define (filter p l)
+  (if (eq? nil l)
+      nil
+      (if (p (first l))
+          (cons (first l) (filter p (rest l)))
+          (filter p (rest l)))))
