@@ -255,7 +255,7 @@ static int parse_simple(const char* start, const char* end, Atom* result)
 	}
 
 	/* NIL or symbol */
-	buf = malloc(sizeof(end - start + 1));
+	buf = malloc(sizeof(char) * (end - start + 1));
 
 	p = buf;
 
