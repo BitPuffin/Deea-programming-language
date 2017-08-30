@@ -797,6 +797,23 @@ static int builtin_div(Atom args, Atom* result)
 	return Error_OK;
 }
 
+static int builtin_modulo(Atom args, Atom* result)
+{
+	Atom a, b;
+	if (nilc(args) || nilc(cdr(args)))
+		return Error_Args;
+
+	a = car(args);
+	b = car(cdr(args));
+
+	if (a.type != AtomType_Integer || b.type != AtomType_Integer)
+		return Error_Type;
+
+	*result = make_int(a.integer % b.integer);
+
+	return Error_OK;
+}
+
 static int builtin_mul(Atom args, Atom* result)
 {
 	Atom a, b;
@@ -1132,6 +1149,7 @@ int main(int argc, char* argv[])
 	env_set(env, make_symbol("-"),             make_builtin(builtin_sub));
 	env_set(env, make_symbol("*"),             make_builtin(builtin_mul));
 	env_set(env, make_symbol("/"),             make_builtin(builtin_div));
+	env_set(env, make_symbol("MODULO"),        make_builtin(builtin_modulo));
 
 	env_set(env, make_symbol("T"),             make_symbol("T"));
 
