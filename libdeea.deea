@@ -3,6 +3,14 @@
 (define (min a b) (if (< a b) a b))
 (define (max a b) (if (> a b) a b))
 
+(define (--reverse-append li tail)
+  (if (eq? nil li)
+      tail
+    (--reverse-append (rest li) (cons (first li) tail))))
+
+(define (reverse l)
+  (--reverse-append l nil))
+
 (define (map f l)
   (if (eq? nil l)
       nil
